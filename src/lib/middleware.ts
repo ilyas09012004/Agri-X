@@ -1,161 +1,181 @@
-import { NextRequest, NextResponse } from 'next/server';
-// ✅ Ganti import ke file yang benar tempat verifyAccessToken berada
-import { verifyAccessToken } from '@/lib/jwt'; // Atau sesuaikan jika berbeda
+// src/app/middleware.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { verifyAccessTokenServer } from '@/lib/auth';
 
-// Simple in-memory rate limiter
-const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+export function middleware(request: NextRequest) {
+  const token = request.cookies.get('accessToken')?.value;
+  const { pathname } = request.nextUrl;
 
-export const rateLimit = (
-  ip: string,
-  windowMs = 5000, // 5 detik
-  maxRequests = 5
-): boolean => {
-  const now = Date.now();
-  const record = rateLimitMap.get(ip);
+  // ============================================
+  // 1. PROTECTED ROUTES (WAJIB LOGIN)
+  // ============================================
+  
+  const protectedRoutes = ['/cart', '/checkout', '/akun', '/orders', '/forum'];
+  
+  if (protectedRoutes.some(route => pathname.startsWith(route))) {
+    if (!token) {
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.searchParams.set('callbackUrl', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
 
-  if (!record) {
-    rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
-    return true;
+    // Verify token validity
+    const decoded = verifyAccessTokenServer(token);
+    if (!decoded) {
+      // Token invalid/expired
+      const response = NextResponse.redirect(new URL('/login', request.url));
+      response.cookies.delete('accessToken');
+      response.cookies.delete('refreshToken');
+      return response;
+    }
   }
 
-  if (now > record.resetTime) {
-    rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
-    return true;
+  // ============================================
+  // 2. AUTH ROUTES (TIDAK BOLEH AKSES JIKA SUDAH LOGIN)
+  // ============================================
+  
+  const authRoutes = ['/login', '/register'];
+
+  if (authRoutes.some(route => pathname.startsWith(route))) {
+    if (token) {
+      const decoded = verifyAccessTokenServer(token);
+      if (decoded) {
+        // User sudah login, redirect ke home
+        return NextResponse.redirect(new URL('/', request.url));
+      }
+    }
   }
 
-  if (record.count >= maxRequests) {
-    return false; // Blocked
+  // ============================================
+  // 3. ADMIN ROUTES (HANYA ADMIN)
+  // ============================================
+  
+  const adminRoutes = ['/admin', '/dashboard'];
+  
+  if (adminRoutes.some(route => pathname.startsWith(route))) {
+    if (!token) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+
+    const decoded = verifyAccessTokenServer(token);
+    if (!decoded || decoded.role !== 'admin') {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
   }
 
-  rateLimitMap.set(ip, { count: record.count + 1 });
-  return true;
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 };
 
-// Auth middleware untuk API routes
+
+// ============================================
+// AUTH REQUIREMENT
+// ============================================
+
 export const requireAuth = (token: string | undefined) => {
   if (!token) return null;
   try {
-    // ✅ Gunakan fungsi verifyAccessToken dari file yang benar
-    const decoded = verifyAccessToken(token); // → { sub: string, role: string }
-    return decoded; // Kembalikan seluruh payload
+    const decoded = verifyAccessTokenServer(token);
+    return decoded;
   } catch {
     return null;
   }
 };
 
-// Error handler middleware
+// ============================================
+// ERROR HANDLER
+// ============================================
+
 export const handleAPIError = (error: any, context: string = 'API') => {
   console.error(`[${context}] Error:`, error);
 
-  if (error instanceof SyntaxError) {
-    return NextResponse.json(
-      { success: false, error: 'INVALID_JSON' },
-      { status: 400 }
-    );
+  const errorResponses: Record<string, { message: string; status: number; code: string }> = {
+    'Invalid JSON': { message: 'Invalid JSON in request body', status: 400, code: 'INVALID_JSON' },
+    'Insufficient stock': { message: error.message, status: 400, code: 'INSUFFICIENT_STOCK' },
+    'not found': { message: 'Resource not found', status: 404, code: 'NOT_FOUND' },
+    'Product not found or deleted': { message: error.message, status: 404, code: 'PRODUCT_NOT_FOUND' },
+    'Product is currently sold out': { message: error.message, status: 400, code: 'PRODUCT_SOLD_OUT' },
+    'Quantity must be at least': { message: error.message, status: 400, code: 'QUANTITY_BELOW_MIN' },
+    'Product not found in cart': { message: error.message, status: 404, code: 'CART_ITEM_NOT_FOUND' },
+    'Product is currently unavailable': { message: error.message, status: 400, code: 'PRODUCT_UNAVAILABLE' },
+    'Unauthorized': { message: 'Unauthorized', status: 401, code: 'UNAUTHORIZED' },
+    'Invalid token': { message: 'Invalid token', status: 401, code: 'INVALID_TOKEN' },
+  };
+
+  for (const [key, config] of Object.entries(errorResponses)) {
+    if (error.message?.includes(key)) {
+      return NextResponse.json(
+        { success: false, error: config.message, code: config.code },
+        { status: config.status }
+      );
+    }
   }
 
-  if (error.message?.includes('Insufficient stock')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 400 }
-    );
-  }
-
-  if (error.message?.includes('not found')) {
-    return NextResponse.json(
-      { success: false, error: 'NOT_FOUND'},
-      { status: 404 }
-    );
-  }
-
-  // Tambahkan pengecekan untuk error lain yang sering muncul
-  if (error.message?.includes('Product not found or deleted')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 404 }
-    );
-  }
-
-  if (error.message?.includes('Product is currently sold out')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 400 }
-    );
-  }
-
-  if (error.message?.includes('Quantity must be at least')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 400 }
-    );
-  }
-
-  if (error.message?.includes('Product not found in cart')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 404 }
-    );
-  }
-
-  if (error.message?.includes('Product is currently unavailable')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 400 }
-    );
-  }
-
-  if (error.message?.includes('Unauthorized')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 401 }
-    );
-  }
-
-  if (error.message?.includes('Invalid token')) {
-    return NextResponse.json(
-      { success: false, error: error.message},
-      { status: 401 }
-    );
-  }
-
-  // Error default
   return NextResponse.json(
-    { success: false, error: 'INTERNAL_ERROR'},
+    { success: false, error: 'Internal Server Error', code: 'INTERNAL_ERROR' },
     { status: 500 }
   );
 };
 
-// Middleware untuk proteksi route dengan auth dan rate limit
+// ============================================
+// API RESPONSE FORMATTER
+// ============================================
+
+export const apiResponse = {
+  success: (data: any, message?: string, status: number = 200) => {
+    return NextResponse.json(
+      { success: true, data, message },
+      { status }
+    );
+  },
+  error: (error: string, code?: string, status: number = 400) => {
+    return NextResponse.json(
+      { success: false, error, code },
+      { status }
+    );
+  },
+};
+
+// ============================================
+// WRAPPER FOR AUTH + RATE LIMIT
+// ============================================
+
 export const withAuthAndRateLimit = (handler: Function) => {
   return async (req: NextRequest, { params }: { params?: any }) => {
-    const ip = req.ip || req.headers.get('x-forwarded-for') || 'unknown';
-
-    // 1. Rate Limit
-    if (!rateLimit(ip)) {
-      return NextResponse.json(
-        { success: false, error: 'Too many requests. Please try again later.' },
-        { status: 429 }
-      );
-    }
-
-    // 2. Auth Check
     const authHeader = req.headers.get('Authorization');
     const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
     const user = requireAuth(token);
 
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'UNAUTHORIZED'},
-        { status: 401 }
-      );
+      return apiResponse.error('Unauthorized', 'UNAUTHORIZED', 401);
     }
 
-    // 3. Panggil handler dengan user context
     try {
-      // ✅ Kirim user sebagai bagian dari context ke handler
       return await handler(req, { params, user });
     } catch (error) {
-      return handleAPIError(error, 'CART_API');
+      return handleAPIError(error, 'API_WRAPPER');
     }
   };
+};
+
+// ============================================
+// REQUEST VALIDATOR
+// ============================================
+
+export const validateRequest = (body: any, requiredFields: string[]) => {
+  const missing = requiredFields.filter(field => !body[field]);
+  
+  if (missing.length > 0) {
+    return {
+      valid: false,
+      error: `Field wajib diisi: ${missing.join(', ')}`,
+      code: 'MISSING_FIELDS',
+    };
+  }
+
+  return { valid: true };
 };

@@ -1,57 +1,185 @@
-import jwt from 'jsonwebtoken';
+// src/lib/auth.ts
+import { jwtDecode } from 'jwt-decode';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET!;
-const REFRESH_SECRET = process.env.REFRESH_TOKEN_SECRET!;
+// ============================================
+// JWT CONFIG
+// ============================================
 
-export const generateTokens = (userId: string, role: string) => {
-  const accessToken = jwt.sign({ sub: userId, role }, JWT_SECRET, { expiresIn: '15m' });
-  const refreshToken = jwt.sign({ sub: userId }, REFRESH_SECRET, { expiresIn: '7d' });
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_EXPIRES_IN = '7d';
+const ACCESS_TOKEN_EXPIRES = '15m';
+
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+
+export interface JwtPayload {
+  sub: string;
+  email?: string;
+  role: string;
+  iat: number;
+  exp: number;
+}
+
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+}
+
+// ============================================
+// PASSWORD HASHING
+// ============================================
+
+export async function hashPassword(password: string): Promise<string> {
+  const saltRounds = 10;
+  return bcrypt.hash(password, saltRounds);
+}
+
+export async function verifyPassword(
+  password: string,
+  hashedPassword: string
+): Promise<boolean> {
+  return bcrypt.compare(password, hashedPassword);
+}
+
+// ============================================
+// JWT TOKEN GENERATION
+// ============================================
+
+export function generateTokens(userId: string, role: string): TokenPair {
+  const payload = { sub: userId, role };
+
+  const accessToken = jwt.sign(payload, JWT_SECRET, {
+    expiresIn: ACCESS_TOKEN_EXPIRES,
+  });
+
+  const refreshToken = jwt.sign(payload, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+  });
+
   return { accessToken, refreshToken };
-};
+}
 
-export const verifyAccessToken = (token: string) => {
-  return jwt.verify(token, JWT_SECRET) as { sub: string; role: string };
-};
+export function generateAccessToken(userId: string, role: string): string {
+  return jwt.sign({ sub: userId, role }, JWT_SECRET, {
+    expiresIn: ACCESS_TOKEN_EXPIRES,
+  });
+}
 
-export const verifyRefreshToken = (token: string) => {
-  return jwt.verify(token, REFRESH_SECRET) as { sub: string };
-};
+export function generateRefreshToken(userId: string, role: string): string {
+  return jwt.sign({ sub: userId, role }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+  });
+}
 
-export const hashPassword = async (password: string) => {
-  return await bcrypt.hash(password, 10);
-};
+// ============================================
+// JWT TOKEN VERIFICATION
+// ============================================
 
-export const verifyPassword = async (password: string, hash: string) => {
-  return await bcrypt.compare(password, hash);
-};
+export function verifyAccessToken(token: string): JwtPayload | null {
+  try {
+    if (!token) {
+      console.log('[verifyAccessToken] No token provided');
+      return null;
+    }
 
-export const getCookie = (name: string): string | null => {
-  // ✅ Periksa apakah di sisi client dulu
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    // ✅ Check token format (should be 3 parts separated by dots)
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.log('[verifyAccessToken] Invalid token format:', token.substring(0, 50) + '...');
+      return null;
+    }
+
+    // ✅ Decode token
+    const decoded = jwtDecode<JwtPayload>(token);
+    
+    console.log('[verifyAccessToken] Decoded token:', {
+      sub: decoded.sub,
+      role: decoded.role,
+      exp: decoded.exp,
+    });
+
+    const now = Date.now() / 1000;
+    
+    // ✅ Check if token is expired
+    if (decoded.exp < now) {
+      console.log('[verifyAccessToken] Token expired. Exp:', decoded.exp, 'Now:', now);
+      return null;
+    }
+    
+    return decoded;
+  } catch (error: any) {
+    console.error('[verifyAccessToken] Token verification error:', error.message);
+    console.error('[verifyAccessToken] Token:', token ? token.substring(0, 50) + '...' : 'MISSING');
     return null;
   }
+}
+
+export function verifyAccessTokenServer(token: string): JwtPayload | null {
+  try {
+    if (!token) return null;
+    
+    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    return decoded;
+  } catch (error) {
+    console.error('Server token verification error:', error);
+    return null;
+  }
+}
+
+export function verifyRefreshToken(token: string): JwtPayload | null {
+  try {
+    if (!token) return null;
+    
+    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    return decoded;
+  } catch (error) {
+    console.error('Refresh token verification error:', error);
+    return null;
+  }
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+export function getUserIdFromToken(token: string): string | null {
+  const decoded = verifyAccessToken(token);
+  return decoded?.sub || null;
+}
+
+export function isTokenValid(token: string): boolean {
+  return verifyAccessToken(token) !== null;
+}
+
+export function getTokenFromHeader(authHeader: string | null): string | null {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  return authHeader.split(' ')[1];
+}
+
+// ============================================
+// COOKIE HELPERS
+// ============================================
+
+export function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
   return null;
-};
+}
 
-export const setAuth = (user: any) => {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('user', JSON.stringify(user));
-  }
-};
+export function setCookie(name: string, value: string, days: number = 7) {
+  if (typeof document === 'undefined') return;
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+  document.cookie = `${name}=${value}; expires=${expires}; path=/; SameSite=Lax`;
+}
 
-export const getAuth = () => {
-  const token = getCookie('accessToken');
-  const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
-  const user = userStr ? JSON.parse(userStr) : null;
-  return { token, user };
-};
-
-export const clearAuth = () => {
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem('user');
-  }
-};
+export function removeCookie(name: string) {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+}

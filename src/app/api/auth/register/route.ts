@@ -1,5 +1,6 @@
+// app/api/auth/register/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { hashPassword } from '@/lib/jwt';
+import { hashPassword } from '@/lib/auth'; // ✅ Fix: dari '@/lib/auth' bukan '@/lib/jwt'
 import crypto from 'crypto';
 import { serialize } from 'cookie';
 import pool from '@/lib/db';
@@ -16,7 +17,8 @@ const getBrowser = (ua: string): string => {
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, password, role = 'buyer' } = await req.json();
+    // ✅ UPDATE: Destructure avatar dari request body
+    const { name, email, password, role = 'buyer', avatar } = await req.json();
 
     if (!name || !email || !password) {
       return NextResponse.json(
@@ -35,7 +37,6 @@ export async function POST(req: NextRequest) {
 
     console.log(`[REGISTER] Attempting registration for email: ${email}`);
 
-    // ✅ Ganti 'user' menjadi 'users'
     const [existingUsers] = await pool.execute(
       'SELECT id FROM users WHERE email = ?',
       [email]
@@ -51,10 +52,10 @@ export async function POST(req: NextRequest) {
 
     const hashedPassword = await hashPassword(password);
 
-    // ✅ Ganti 'user' menjadi 'users'
+    // ✅ UPDATE: Tambahkan avatar ke INSERT
     const insertResult = await pool.execute(
-      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
-      [name, email, hashedPassword, role]
+      'INSERT INTO users (name, email, password, role, avatar) VALUES (?, ?, ?, ?, ?)',
+      [name, email, hashedPassword, role, avatar || null]
     ) as any;
 
     const newUserId = insertResult.insertId;
@@ -89,11 +90,18 @@ export async function POST(req: NextRequest) {
     headers.set('Set-Cookie', serialize('refreshToken', refreshToken, cookieOptions));
     headers.append('Set-Cookie', serialize('accessToken', accessToken, { ...cookieOptions, httpOnly: false }));
 
+    // ✅ UPDATE: Tambahkan avatar ke response
     return NextResponse.json(
       {
         success: true,
         message: 'Registration successful',
-        user: { id: String(newUserId), name, email, role }
+        user: { 
+          id: String(newUserId), 
+          name, 
+          email, 
+          role,
+          avatar: avatar || null, // ✅ NEW
+        }
       },
       { status: 201, headers }
     );

@@ -5,104 +5,82 @@ import { randomUUID } from 'crypto'; // Tidak digunakan di file ini kecuali untu
 import { handleAPIError } from '@/lib/middleware';
 import { verifyAccessToken } from '@/lib/auth';
 
-// Definisikan tipe Product sesuai struktur tabel baru (dengan id dan seller_id numerik)
-interface Product {
-  id: number; // Diubah dari string ke number
-  name: string;
-  description: string;
-  price: number;
-  unit: string;
-  stock: number;
-  min_order: number;
-  seller_id: number; // Diubah dari string ke number (jika seller_id numerik)
-  harvest_date: string | null;
-  image_path: string | null;
-  category: string | null;
-  status: 'pre-order' | 'ready_stock' | 'sold_out' | 'deleted';
-  created_at: string;
-  updated_at: string;
-}
+type Params = {
+  params: Promise<{ id: string }>;
+};
 
-// Definisikan tipe untuk update partial (untuk PATCH) - seller_id numerik
-interface PartialProductUpdate {
-  name?: string;
-  description?: string;
-  price?: number;
-  unit?: string;
-  stock?: number;
-  min_order?: number;
-  seller_id?: number; // Diubah dari string ke number (jika seller_id numerik)
-  harvest_date?: string; // ISO string atau null
-  image_path?: string; // Path relatif ke public
-  category?: string;
-  status?: 'pre-order' | 'ready_stock' | 'sold_out' | 'deleted';
-}
-// ✅ GET: Ambil semua item di keranjang user
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest, { params }: Params) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
+    const resolvedParams = await params;
+    const productId = resolvedParams.id;
+
+    if (!productId) {
+      return NextResponse.json(
+        { success: false, error: 'Product ID is missing', code: 'MISSING_ID' },
+        { status: 400 }
+      );
     }
 
-    const token = authHeader.split(' ')[1];
-    const decoded = verifyAccessToken(token);
-    if (!decoded) {
-      throw new Error('Invalid token');
+    if (!/^\d+$/.test(productId)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid product ID format', code: 'INVALID_ID' },
+        { status: 400 }
+      );
     }
 
-    const userId = decoded.sub;
-
-    // Ambil item keranjang dan join dengan tabel produk
-    const [cartItems] = await pool.execute(`
+    // ✅ FIX: Gunakan image_path bukan image
+    const query = `
       SELECT 
-        ci.id as cartItemId, 
-        ci.userId, 
-        ci.productId, 
-        ci.quantity, 
-        ci.createdAt, 
-        ci.updatedAt,
-        p.id as productId,
-        p.name as productName,
-        p.price as productPrice,
-        p.image as productImage,
-        p.min_order as productMinOrder,
-        p.stock as productStock,
-        p.status as productStatus,
-        p.unit as productUnit
-      FROM cartitems ci
-      JOIN products p ON ci.productId = p.id
-      WHERE ci.userId = ? AND p.status != ?
-    `, [userId, 'deleted']);
+        id, name, description, price, unit, stock, min_order, seller_id, 
+        harvest_date, image_path, category, status, created_at, updated_at 
+      FROM products 
+      WHERE id = ? AND status != ?
+    `;
+    
+    const [rows] = await pool.execute(query, [parseInt(productId, 10), 'deleted']);
 
-    // Format data
-    const formattedCartItems = (Array.isArray(cartItems) ? cartItems : []).map((item: any) => ({
-      id: item.cartItemId, // ID dari tabel cartitems
-      userId: item.userId,
-      productId: item.productId,
-      quantity: item.quantity,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-      product: {
-        id: item.productId, // ID dari tabel products
-        name: item.productName,
-        price: item.productPrice,
-        image: item.productImage,
-        min_order: item.productMinOrder,
-        stock: item.productStock,
-        status: item.productStatus,
-        unit: item.productUnit,
-      }
-    }));
+    console.log('Query Result:', rows);
+    console.log('Rows Count:', Array.isArray(rows) ? rows.length : 0);
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Product not found', code: 'NOT_FOUND' },
+        { status: 404 }
+      );
+    }
+
+    const product = rows[0];
+
+    // Format response
+    const formattedProduct = {
+      id: product.id,
+      name: product.name,
+      description: product.description,
+      price: parseFloat(product.price) || 0,
+      unit: product.unit || 'kg',
+      stock: product.stock || 0,
+      min_order: product.min_order || 1,
+      seller_id: product.seller_id,
+      harvest_date: product.harvest_date,
+      image_path: product.image_path,
+      category: product.category,
+      status: product.status,
+      rating: 0, // Bisa ditambahkan nanti dari reviews
+      reviews: 0,
+      created_at: product.created_at,
+      updated_at: product.updated_at,
+    };
+
+    console.log('Formatted Product:', formattedProduct);
 
     return NextResponse.json({
       success: true,
-       formattedCartItems
+      product: formattedProduct,
     });
 
-  } catch (err: any) {
-    console.error('Error fetching cart:', err);
-    return handleAPIError(err, 'GET /api/cart');
+  } catch (error: any) {
+    console.error('Error fetching product by ID:', error);
+    return handleAPIError(error, 'GET /api/products/[id]');
   }
 }
 
