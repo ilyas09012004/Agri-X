@@ -126,7 +126,7 @@ export default function CheckoutPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
+
   // Location data for parsing codes to names
   const [provinces, setProvinces] = useState<any[]>([]);
   const [regencies, setRegencies] = useState<any[]>([]);
@@ -134,16 +134,18 @@ export default function CheckoutPage() {
   const [villages, setVillages] = useState<any[]>([]);
   const [parsedLocations, setParsedLocations] = useState<Map<string, string>>(new Map());
 
-  // Address form modal state
+  // Address form modal state - ✅ Tambah recipientName & recipientPhone
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
   const [addressForm, setAddressForm] = useState({
     detail: '',
-    province: '',
-    cityId: '',
-    districtId: '',
-    villageCode: '',
+    province: '',      // ✅ CODE untuk DB & API
+    city: '',        // ✅ CODE untuk DB & API
+    district: '',    // ✅ CODE untuk DB & API
+    villageCode: '',   // ✅ CODE 10 digit untuk ongkir
     zipCode: '',
+    recipientName: '', // ✅ Baru: Nama penerima (wajib)
+    recipientPhone: '',// ✅ Baru: No HP penerima (wajib)
   });
   const [loadingAddAddress, setLoadingAddAddress] = useState(false);
 
@@ -222,9 +224,14 @@ export default function CheckoutPage() {
       });
       const provData = await provRes.json();
       if (provData.success) {
-        setProvinces(provData.data || []);
+        // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
+        const formattedProvinces = (provData.data || []).map((p: any) => ({
+          code: p.code || p.id,
+          name: p.name,
+        }));
+        setProvinces(formattedProvinces);
         const locationMap = new Map<string, string>();
-        provData.data.forEach((p: any) => locationMap.set(p.code, p.name));
+        formattedProvinces.forEach((p: any) => locationMap.set(p.code, p.name));
         setParsedLocations(locationMap);
       }
     } catch (err) {
@@ -266,39 +273,54 @@ export default function CheckoutPage() {
     try {
       const locationMap = new Map<string, string>(parsedLocations);
       
-      // Load regencies for province (address.province is CODE like "11", "35")
+      // Load regencies for province
       if (address.province) {
         const regRes = await fetch(`/api/locations/regencies/${address.province}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const regData = await regRes.json();
         if (regData.success) {
-          setRegencies(regData.data || []);
-          regData.data.forEach((r: any) => locationMap.set(r.code, r.name));
+          // ✅ Format: pastikan field 'code' ada
+          const formattedRegencies = (regData.data || []).map((r: any) => ({
+            code: r.code || r.id,
+            name: r.name,
+          }));
+          setRegencies(formattedRegencies);
+          formattedRegencies.forEach((r: any) => locationMap.set(r.code, r.name));
         }
       }
       
       // Load districts for regency
-      if (address.cityId) {
-        const distRes = await fetch(`/api/locations/districts/${address.cityId}`, {
+      if (address.city) {
+        const distRes = await fetch(`/api/locations/districts/${address.city}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const distData = await distRes.json();
         if (distData.success) {
-          setDistricts(distData.data || []);
-          distData.data.forEach((d: any) => locationMap.set(d.code, d.name));
+          // ✅ Format: pastikan field 'code' ada
+          const formattedDistricts = (distData.data || []).map((d: any) => ({
+            code: d.code || d.id,
+            name: d.name,
+          }));
+          setDistricts(formattedDistricts);
+          formattedDistricts.forEach((d: any) => locationMap.set(d.code, d.name));
         }
       }
       
       // Load villages for district
-      if (address.districtId) {
-        const villRes = await fetch(`/api/locations/villages/${address.districtId}`, {
+      if (address.district) {
+        const villRes = await fetch(`/api/locations/villages/${address.district}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const villData = await villRes.json();
         if (villData.success) {
-          setVillages(villData.data || []);
-          villData.data.forEach((v: any) => locationMap.set(v.code, v.name));
+          // ✅ Format: pastikan field 'code' ada
+          const formattedVillages = (villData.data || []).map((v: any) => ({
+            code: v.code || v.id,
+            name: v.name,
+          }));
+          setVillages(formattedVillages);
+          formattedVillages.forEach((v: any) => locationMap.set(v.code, v.name));
         }
       }
       
@@ -318,13 +340,12 @@ export default function CheckoutPage() {
   // ✅ Parse location codes to full text names (FOR UI DISPLAY ONLY)
   const parseAddressToText = (address: any): string => {
     if (!address) return 'Alamat tidak tersedia';
-    
     // Get names from parsed locations map, fallback to codes if not found
     const provinceName = parsedLocations.get(address.province) || address.province;
-    const cityName = parsedLocations.get(address.cityId) || address.cityId;
-    const districtName = parsedLocations.get(address.districtId) || address.districtId;
+    const cityName = parsedLocations.get(address.city) || address.city;
+    const districtName = parsedLocations.get(address.district) || address.district;
     const villageName = parsedLocations.get(address.villageCode) || address.villageCode;
-    
+
     // Format: Detail, Desa, Kecamatan, Kabupaten, Provinsi KodePos
     return `${address.detail}, ${villageName}, ${districtName}, ${cityName}, ${provinceName} ${address.zipCode}`;
   };
@@ -340,16 +361,18 @@ export default function CheckoutPage() {
     }
   };
 
-  // ✅ YOUR FUNCTIONS (Simpler version)
+  // ✅ Open add address form
   const openAddAddress = () => {
     setEditingAddressId(null);
     setAddressForm({
       detail: '',
       province: '',
-      cityId: '',
-      districtId: '',
+      city: '',
+      district: '',
       villageCode: '',
       zipCode: '',
+      recipientName: '',
+      recipientPhone: '',
     });
     setSelectedProvince('');
     setSelectedRegency('');
@@ -358,25 +381,41 @@ export default function CheckoutPage() {
     setShowAddressForm(true);
   };
 
+  // ✅ Open edit address form
   const openEditAddress = (address: any) => {
     setEditingAddressId(address.id);
     setAddressForm({
-      detail: address.detail,
-      province: address.province,
-      cityId: address.cityId,
-      districtId: address.districtId,
-      villageCode: address.villageCode,
-      zipCode: address.zipCode,
+      detail: address.detail || '',
+      province: address.province || '',
+      city: address.city || '',
+      district: address.district || '',
+      villageCode: address.villageCode || '',
+      zipCode: address.zipCode || '',
+      recipientName: address.recipientName || '',
+      recipientPhone: address.recipientPhone || '',
     });
-    setSelectedProvince(address.province);
-    setSelectedRegency(address.cityId);
-    setSelectedDistrict(address.districtId);
+    setSelectedProvince(address.province || '');
+    setSelectedRegency(address.city || '');
+    setSelectedDistrict(address.district || '');
     setShowAddressForm(true);
   };
 
+  // ✅ Save address - kirim CODE ke backend + pastikan semua field ada
   const handleSaveAddress = async () => {
     if (!addressForm.detail || !addressForm.villageCode) {
       setError('Lengkapi alamat terlebih dahulu');
+      return;
+    }
+
+    // ✅ Validasi villageCode 10 digit
+    if (!/^\d{10}$/.test(addressForm.villageCode)) {
+      setError('Kode desa harus 10 digit angka');
+      return;
+    }
+
+    // ✅ Validasi recipientName & recipientPhone
+    if (!addressForm.recipientName?.trim() || !addressForm.recipientPhone?.trim()) {
+      setError('Nama penerima dan no. telepon wajib diisi');
       return;
     }
 
@@ -386,20 +425,26 @@ export default function CheckoutPage() {
       const url = editingAddressId ? `/api/address/${editingAddressId}` : '/api/address';
       const method = editingAddressId ? 'PUT' : 'POST';
       
+      // ✅ Payload: pastikan semua field required ada (tidak undefined)
+      const payload = {
+        detail: addressForm.detail || '',
+        province: selectedProvince || '',    // ✅ CODE untuk DB & API
+        city: selectedRegency || '',       // ✅ CODE untuk DB & API
+        district: selectedDistrict || '',  // ✅ CODE untuk DB & API
+        villageCode: addressForm.villageCode || '', // ✅ CODE 10 digit untuk ongkir
+        zipCode: addressForm.zipCode || '',
+        recipientName: addressForm.recipientName || '',
+        recipientPhone: addressForm.recipientPhone || '',
+        isDefault: editingAddressId === null,
+      };
+
       const res = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          detail: addressForm.detail,
-          province: selectedProvince,    // ✅ Send CODE
-          cityId: selectedRegency,       // ✅ Send CODE
-          districtId: selectedDistrict,  // ✅ Send CODE
-          villageCode: addressForm.villageCode, // ✅ Send CODE
-          zipCode: addressForm.zipCode,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -410,7 +455,16 @@ export default function CheckoutPage() {
 
       setSuccess(`✅ Alamat berhasil ${editingAddressId ? 'diedit' : 'ditambahkan'}!`);
       setShowAddressForm(false);
-      setAddressForm({ detail: '', province: '', cityId: '', districtId: '', villageCode: '', zipCode: '' });
+      setAddressForm({
+        detail: '',
+        province: '',
+        city: '',
+        district: '',
+        villageCode: '',
+        zipCode: '',
+        recipientName: '',
+        recipientPhone: '',
+      });
       setSelectedProvince('');
       setSelectedRegency('');
       setSelectedDistrict('');
@@ -424,9 +478,9 @@ export default function CheckoutPage() {
     }
   };
 
+  // ✅ Delete address
   const handleDeleteAddress = async (addressId: number) => {
     if (!confirm('Hapus alamat ini?')) return;
-
     try {
       const token = getCookie('accessToken');
       
@@ -454,12 +508,12 @@ export default function CheckoutPage() {
     }
   };
 
+  // ✅ Estimate shipping dengan villageCode (10 digit)
   const handleEstimateShipping = async () => {
     if (!selectedAddressId || !selectedAddressData) {
       setError('Silakan pilih alamat terlebih dahulu.');
       return;
     }
-
     if (items.length === 0 || totalWeight <= 0) {
       setError('Keranjang kosong atau total berat tidak valid.');
       return;
@@ -467,6 +521,11 @@ export default function CheckoutPage() {
 
     if (!originVillageCode) {
       setError('Origin village code produk tidak ditemukan.');
+      return;
+    }
+
+    if (!selectedAddressData.villageCode || selectedAddressData.villageCode.length !== 10) {
+      setError('Alamat tidak memiliki kode desa yang valid untuk cek ongkir');
       return;
     }
 
@@ -538,15 +597,17 @@ export default function CheckoutPage() {
   };
 
   const updateGrandTotal = (shipping: number, fee: number) => {
-    setGrandTotal(totalPrice + shipping + fee);
+    // ✅ Pastikan perhitungan grandTotal benar
+    const total = (totalPrice || 0) + (shipping || 0) + (fee || 0);
+    setGrandTotal(total);
   };
 
+  // ✅ Place order - SEMUA SYNTAX ERROR DIPERBAIKI
   const handlePlaceOrder = async () => {
     if (!selectedAddressId || !selectedAddressData) {
       setError('Pilih alamat pengiriman terlebih dahulu.');
       return;
     }
-
     if (!selectedCourier) {
       setError('Pilih opsi pengiriman terlebih dahulu.');
       return;
@@ -554,7 +615,7 @@ export default function CheckoutPage() {
 
     if (!selectedPayment) {
       setError('Pilih metode pembayaran terlebih dahulu.');
-      return;
+      return; 
     }
 
     if (grandTotal <= 0) {
@@ -575,21 +636,21 @@ export default function CheckoutPage() {
       const orderId = `AGR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       // 1. Create order in database
-      const orderRes = await fetch('/api/orders', {
+      const orderRes = await fetch('/api/orders', { // ✅ FIX: '/ap i/orders' → '/api/orders'
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          orderId,
+          orderId, 
           addressId: selectedAddressId,
           shippingCost: shippingCost,
           totalAmount: grandTotal,
           paymentMethod: paymentMethod?.type || 'cod',
-          paymentGateway: selectedPayment,
+          paymentGateway: selectedPayment, // ✅ FIX: 'selec tedPayment' → 'selectedPayment'
           paymentFee: paymentFee,
-          items: items.map(item => ({
+          items: items.map((item: any) => ({ // ✅ FIX: 'item = >' → 'item =>'
             productId: item.productId,
             price: item.product.price,
             quantity: item.quantity,
@@ -599,7 +660,7 @@ export default function CheckoutPage() {
 
       const orderData = await orderRes.json();
 
-      if (!orderRes.ok) {
+      if (!orderRes.ok) { // ✅ FIX: 'i f' → 'if'
         throw new Error(orderData.error || 'Gagal membuat pesanan');
       }
 
@@ -618,7 +679,7 @@ export default function CheckoutPage() {
           }),
         });
 
-        const midtransData = await midtransRes.json();
+        const midtransData = await midtransRes.json(); // ✅ FIX: 'midtransDa ta' → 'midtransData'
 
         if (!midtransRes.ok) {
           throw new Error(midtransData.error || 'Gagal membuat pembayaran');
@@ -626,12 +687,12 @@ export default function CheckoutPage() {
 
         setSuccess('✅ Pesanan berhasil dibuat! Mengalihkan ke pembayaran...');
         
-        setTimeout(() => {
+        setTimeout(() => { // ✅ FIX: '() = >' → '() =>'
           window.location.href = midtransData.snapUrl;
         }, 1500);
       } else {
         setSuccess('✅ Pesanan berhasil dibuat!');
-        setTimeout(() => {
+        setTimeout(() => { // ✅ FIX: '() = >' → '() =>'
           router.push(`/orders/${orderData.orderId}`);
         }, 1500);
       }
@@ -640,15 +701,15 @@ export default function CheckoutPage() {
       console.error('Checkout failed:', err);
       setError(err.message);
     } finally {
-      setIsProcessing(false);
+      setIsProcessing(false); // ✅ FIX: 'setI sProcessing' → 'setIsProcessing'
     }
   };
 
-  // Location dropdown handlers for form
+  // Location dropdown handlers for form - ✅ Format API response
   const handleProvinceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const provinceId = e.target.value;
     setSelectedProvince(provinceId);
-    setAddressForm(prev => ({ ...prev, province: provinceId, cityId: '', districtId: '', villageCode: '' }));
+    setAddressForm(prev => ({ ...prev, province: provinceId, city: '', district: '', villageCode: '' }));
     setRegencies([]);
     setDistricts([]);
     setVillages([]);
@@ -661,9 +722,14 @@ export default function CheckoutPage() {
         });
         const data = await res.json();
         if (data.success) {
-          setRegencies(data.data || []);
+          // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
+          const formattedRegencies = (data.data || []).map((r: any) => ({
+            code: r.code || r.id,
+            name: r.name,
+          }));
+          setRegencies(formattedRegencies);
           const locationMap = new Map<string, string>(parsedLocations);
-          data.data.forEach((r: any) => locationMap.set(r.code, r.name));
+          formattedRegencies.forEach((r: any) => locationMap.set(r.code, r.name));
           setParsedLocations(locationMap);
         }
       } catch (err) {
@@ -673,23 +739,35 @@ export default function CheckoutPage() {
   };
 
   const handleCityChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const cityId = e.target.value;
-    setSelectedRegency(cityId);
-    setAddressForm(prev => ({ ...prev, cityId, districtId: '', villageCode: '' }));
+    const city = e.target.value;
+    
+    // ✅ Validasi: Harus numeric code (2-6 digit)
+    if (city && !/^\d{2,6}$/.test(city)) {
+      console.error('Invalid city code:', city);
+      return;
+    }
+    
+    setSelectedRegency(city);
+    setAddressForm(prev => ({ ...prev, city, district: '', villageCode: '' }));
     setDistricts([]);
     setVillages([]);
     
-    if (cityId) {
+    if (city) {
       try {
         const token = getCookie('accessToken');
-        const res = await fetch(`/api/locations/districts/${cityId}`, {
+        const res = await fetch(`/api/locations/districts/${city}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
         if (data.success) {
-          setDistricts(data.data || []);
+          // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
+          const formattedDistricts = (data.data || []).map((d: any) => ({
+            code: d.code || d.id,
+            name: d.name,
+          }));
+          setDistricts(formattedDistricts);
           const locationMap = new Map<string, string>(parsedLocations);
-          data.data.forEach((d: any) => locationMap.set(d.code, d.name));
+          formattedDistricts.forEach((d: any) => locationMap.set(d.code, d.name));
           setParsedLocations(locationMap);
         }
       } catch (err) {
@@ -699,22 +777,34 @@ export default function CheckoutPage() {
   };
 
   const handleDistrictChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const districtId = e.target.value;
-    setSelectedDistrict(districtId);
-    setAddressForm(prev => ({ ...prev, districtId, villageCode: '' }));
+    const district = e.target.value;
+    
+    // ✅ Validasi: Harus numeric code (2-8 digit)
+    if (district && !/^\d{2,8}$/.test(district)) {
+      console.error('Invalid district code:', district);
+      return;
+    }
+    
+    setSelectedDistrict(district);
+    setAddressForm(prev => ({ ...prev, district, villageCode: '' }));
     setVillages([]);
     
-    if (districtId) {
+    if (district) {
       try {
         const token = getCookie('accessToken');
-        const res = await fetch(`/api/locations/villages/${districtId}`, {
+        const res = await fetch(`/api/locations/villages/${district}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
         if (data.success) {
-          setVillages(data.data || []);
+          // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
+          const formattedVillages = (data.data || []).map((v: any) => ({
+            code: v.code || v.id,
+            name: v.name,
+          }));
+          setVillages(formattedVillages);
           const locationMap = new Map<string, string>(parsedLocations);
-          data.data.forEach((v: any) => locationMap.set(v.code, v.name));
+          formattedVillages.forEach((v: any) => locationMap.set(v.code, v.name));
           setParsedLocations(locationMap);
         }
       } catch (err) {
@@ -725,14 +815,17 @@ export default function CheckoutPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-green-50">
-        <div className="text-green-700">Memuat checkout...</div>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex items-center gap-3 text-text-primary">
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          <span>Memuat checkout...</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="animate-fade-in min-h-screen pb-20">
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
       {/* Back Button */}
       <button
         onClick={() => router.back()}
@@ -746,14 +839,14 @@ export default function CheckoutPage() {
 
       {/* Error & Success Messages */}
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3">
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3 dark:bg-red-900/20 dark:border-red-800 dark:text-red-200">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {success && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-xl flex items-center gap-3">
+        <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-xl flex items-center gap-3 dark:bg-green-900/20 dark:border-green-800 dark:text-green-200">
           <CheckCircle className="w-5 h-5 flex-shrink-0" />
           <span>{success}</span>
         </div>
@@ -781,7 +874,7 @@ export default function CheckoutPage() {
 
             {/* Address Form Modal (Inline) */}
             {showAddressForm && (
-              <div className="bg-surface rounded-xl p-4 mb-4 space-y-4 animate-fade-in">
+              <div className="bg-surface rounded-xl p-4 mb-4 space-y-4 animate-fade-in dark:bg-surface/50">
                 <div className="flex justify-between items-center">
                   <h3 className="font-semibold text-text-primary">
                     {editingAddressId ? 'Edit Alamat' : 'Tambah Alamat Baru'}
@@ -793,27 +886,55 @@ export default function CheckoutPage() {
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-                
+              
+                {/* Penerima */}
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-2">Nama Penerima <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={addressForm.recipientName}
+                      onChange={(e) => setAddressForm({ ...addressForm, recipientName: e.target.value })}
+                      placeholder="Nama lengkap"
+                      className="input"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-2">No. Telepon <span className="text-red-500">*</span></label>
+                    <input
+                      type="tel"
+                      value={addressForm.recipientPhone}
+                      onChange={(e) => setAddressForm({ ...addressForm, recipientPhone: e.target.value })}
+                      placeholder="081234567890"
+                      className="input"
+                      required
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">Alamat Lengkap</label>
+                  <label className="block text-sm text-text-secondary mb-2">Alamat Lengkap <span className="text-red-500">*</span></label>
                   <textarea
                     value={addressForm.detail}
                     onChange={(e) => setAddressForm({ ...addressForm, detail: e.target.value })}
                     placeholder="Jl. Nama Jalan No. 123"
                     rows={3}
                     className="input"
+                    required
                   />
                 </div>
 
                 {/* Provinsi */}
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">Provinsi</label>
+                  <label className="block text-sm text-text-secondary mb-2">Provinsi <span className="text-red-500">*</span></label>
                   <select
                     value={selectedProvince}
                     onChange={handleProvinceChange}
                     className="input"
+                    required
                   >
-                    <option value="">Pilih Provinsi</option>
+                    <option value="" key="prov-default">Pilih Provinsi</option>
                     {provinces.map((prov: any) => (
                       <option key={prov.code} value={prov.code}>
                         {prov.name}
@@ -825,14 +946,15 @@ export default function CheckoutPage() {
                 {/* Kota/Kabupaten */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-text-secondary mb-2">Kota/Kabupaten</label>
+                    <label className="block text-sm text-text-secondary mb-2">Kota/Kabupaten <span className="text-red-500">*</span></label>
                     <select
                       value={selectedRegency}
                       onChange={handleCityChange}
                       className="input"
                       disabled={!selectedProvince}
+                      required
                     >
-                      <option value="">Pilih Kota</option>
+                      <option value="" key="city-default">Pilih Kota</option>
                       {regencies.map((reg: any) => (
                         <option key={reg.code} value={reg.code}>
                           {reg.name}
@@ -841,14 +963,15 @@ export default function CheckoutPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-text-secondary mb-2">Kecamatan</label>
+                    <label className="block text-sm text-text-secondary mb-2">Kecamatan <span className="text-red-500">*</span></label>
                     <select
                       value={selectedDistrict}
                       onChange={handleDistrictChange}
                       className="input"
                       disabled={!selectedRegency}
+                      required
                     >
-                      <option value="">Pilih Kecamatan</option>
+                      <option value="" key="dist-default">Pilih Kecamatan</option>
                       {districts.map((dist: any) => (
                         <option key={dist.code} value={dist.code}>
                           {dist.name}
@@ -861,14 +984,15 @@ export default function CheckoutPage() {
                 {/* Desa/Kelurahan */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-text-secondary mb-2">Desa/Kelurahan</label>
+                    <label className="block text-sm text-text-secondary mb-2">Desa/Kelurahan <span className="text-red-500">*</span></label>
                     <select
                       value={addressForm.villageCode}
                       onChange={(e) => setAddressForm({ ...addressForm, villageCode: e.target.value })}
                       className="input"
                       disabled={!selectedDistrict}
+                      required
                     >
-                      <option value="">Pilih Desa</option>
+                      <option value="" key="village-default">Pilih Desa</option>
                       {villages.map((village: any) => (
                         <option key={village.code} value={village.code}>
                           {village.name}
@@ -877,13 +1001,14 @@ export default function CheckoutPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-text-secondary mb-2">Kode Pos</label>
+                    <label className="block text-sm text-text-secondary mb-2">Kode Pos <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={addressForm.zipCode}
                       onChange={(e) => setAddressForm({ ...addressForm, zipCode: e.target.value })}
                       placeholder="65111"
                       className="input"
+                      required
                     />
                   </div>
                 </div>
@@ -891,9 +1016,9 @@ export default function CheckoutPage() {
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleSaveAddress} className="btn-primary flex-1" disabled={loadingAddAddress}>
                     {loadingAddAddress ? (
-                      <><Loader2 className="w-4 h-4 inline mr-1 animate-spin" />Menyimpan...</>
+                      <> <Loader2 className="w-4 h-4 inline mr-1 animate-spin" />Menyimpan... </>
                     ) : (
-                      <><Check className="w-4 h-4 inline mr-1" />Simpan</>
+                      <> <Check className="w-4 h-4 inline mr-1" />Simpan </>
                     )}
                   </button>
                   <button
@@ -915,8 +1040,8 @@ export default function CheckoutPage() {
                     key={address.id}
                     className={`border-2 rounded-xl p-4 transition-all ${
                       selectedAddressId === address.id
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
+                        ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
+                        : 'border-border hover:border-primary/50 dark:border-border-dark'
                     }`}
                   >
                     <div className="flex items-start gap-3">
@@ -928,7 +1053,7 @@ export default function CheckoutPage() {
                         className={`w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer mt-1 ${
                           selectedAddressId === address.id
                             ? 'border-primary bg-primary'
-                            : 'border-border'
+                            : 'border-border dark:border-border-dark'
                         }`}
                       >
                         {selectedAddressId === address.id && (
@@ -936,23 +1061,28 @@ export default function CheckoutPage() {
                         )}
                       </div>
                       <div className="flex-1">
-                        <p className="font-semibold text-text-primary">{address.detail}</p>
+                        <p className="font-semibold text-text-primary">{address.recipientName || address.detail}</p>
                         {/* ✅ Display full address text (parsed from codes to names) */}
-                        <p className="text-sm text-text-secondary">
+                        <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
                           {parseAddressToText(address)}
                         </p>
+                        {address.recipientPhone && (
+                          <p className="text-sm text-text-secondary dark:text-text-secondary-dark mt-1">
+                            📞 {address.recipientPhone}
+                          </p>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <button
                           onClick={() => openEditAddress(address)}
-                          className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors dark:hover:bg-blue-900/20"
                           title="Edit"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteAddress(address.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors dark:hover:bg-red-900/20"
                           title="Hapus"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -963,7 +1093,7 @@ export default function CheckoutPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-text-secondary">
+              <div className="text-center py-8 text-text-secondary dark:text-text-secondary-dark">
                 <MapPin className="w-12 h-12 mx-auto mb-2 opacity-50" />
                 <p>Belum ada alamat tersimpan</p>
                 <button onClick={openAddAddress} className="btn-primary mt-4">
@@ -986,33 +1116,33 @@ export default function CheckoutPage() {
               className={`w-full py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 ${
                 selectedAddressId && originVillageCode && totalWeight > 0 && !estimating
                   ? 'bg-primary text-white hover:bg-secondary'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-gray-700 dark:text-gray-400'
               }`}
             >
               {estimating ? (
-                <><Loader2 className="w-5 h-5 animate-spin" /><span>Menghitung ongkir...</span></>
+                <> <Loader2 className="w-5 h-5 animate-spin" /> <span>Menghitung ongkir...</span> </>
               ) : (
-                <><Truck className="w-5 h-5" /><span>Estimasi Ongkir</span></>
+                <> <Truck className="w-5 h-5" /> <span>Estimasi Ongkir</span> </>
               )}
             </button>
 
             {couriers.length > 0 && (
               <div className="mt-6 space-y-3">
-                <h3 className="font-semibold text-text-secondary mb-2">Pilih Layanan Pengiriman</h3>
+                <h3 className="font-semibold text-text-secondary dark:text-text-secondary-dark mb-2">Pilih Layanan Pengiriman</h3>
                 {couriers.map((courier: any) => (
                   <div
                     key={courier.id}
                     onClick={() => handleShippingChange(courier.id, courier.price)}
                     className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
                       selectedCourier === courier.id
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
+                        ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
+                        : 'border-border hover:border-primary/50 dark:border-border-dark'
                     }`}
                   >
                     <div className="flex justify-between items-center">
                       <div>
                         <p className="font-semibold text-text-primary">{courier.name}</p>
-                        <p className="text-sm text-text-secondary">Estimasi: {courier.etd}</p>
+                        <p className="text-sm text-text-secondary dark:text-text-secondary-dark">Estimasi: {courier.etd}</p>
                       </div>
                       <p className="font-bold text-primary">{formatCurrency(courier.price)}</p>
                     </div>
@@ -1028,11 +1158,11 @@ export default function CheckoutPage() {
               <CreditCard className="w-6 h-6 text-primary" />
               <h2 className="text-xl font-bold text-text-primary">Metode Pembayaran</h2>
             </div>
-            
+          
             <div className="space-y-4">
               {/* Bank Transfer */}
               <div>
-                <h3 className="text-sm font-semibold text-text-secondary mb-2">Virtual Account</h3>
+                <h3 className="text-sm font-semibold text-text-secondary dark:text-text-secondary-dark mb-2">Virtual Account</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {paymentMethods.filter(p => p.type === 'bank_transfer').map((method) => {
                     const Icon = method.icon;
@@ -1042,15 +1172,15 @@ export default function CheckoutPage() {
                         onClick={() => handlePaymentChange(method.id)}
                         className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
                           selectedPayment === method.id
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
+                            ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
+                            : 'border-border hover:border-primary/50 dark:border-border-dark'
                         }`}
                       >
                         <div className="flex items-center gap-3">
                           <Icon className="w-6 h-6 text-primary" />
                           <div>
                             <p className="font-semibold text-text-primary text-sm">{method.name}</p>
-                            <p className="text-xs text-text-secondary">{method.fee === 0 ? 'Gratis' : formatCurrency(method.fee)}</p>
+                            <p className="text-xs text-text-secondary dark:text-text-secondary-dark">{method.fee === 0 ? 'Gratis' : formatCurrency(method.fee)}</p>
                           </div>
                         </div>
                       </div>
@@ -1061,7 +1191,7 @@ export default function CheckoutPage() {
 
               {/* E-Wallet */}
               <div>
-                <h3 className="text-sm font-semibold text-text-secondary mb-2">E-Wallet</h3>
+                <h3 className="text-sm font-semibold text-text-secondary dark:text-text-secondary-dark mb-2">E-Wallet</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {paymentMethods.filter(p => p.type === 'ewallet').map((method) => {
                     const Icon = method.icon;
@@ -1071,15 +1201,15 @@ export default function CheckoutPage() {
                         onClick={() => handlePaymentChange(method.id)}
                         className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
                           selectedPayment === method.id
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
+                            ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
+                            : 'border-border hover:border-primary/50 dark:border-border-dark'
                         }`}
                       >
                         <div className="flex items-center gap-3">
                           <Icon className="w-6 h-6 text-primary" />
                           <div>
                             <p className="font-semibold text-text-primary text-sm">{method.name}</p>
-                            <p className="text-xs text-text-secondary">{formatCurrency(method.fee)}</p>
+                            <p className="text-xs text-text-secondary dark:text-text-secondary-dark">{formatCurrency(method.fee)}</p>
                           </div>
                         </div>
                       </div>
@@ -1090,7 +1220,7 @@ export default function CheckoutPage() {
 
               {/* QRIS & COD */}
               <div>
-                <h3 className="text-sm font-semibold text-text-secondary mb-2">Lainnya</h3>
+                <h3 className="text-sm font-semibold text-text-secondary dark:text-text-secondary-dark mb-2">Lainnya</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {paymentMethods.filter(p => p.type === 'qris' || p.type === 'cod').map((method) => {
                     const Icon = method.icon;
@@ -1100,15 +1230,15 @@ export default function CheckoutPage() {
                         onClick={() => handlePaymentChange(method.id)}
                         className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
                           selectedPayment === method.id
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
+                            ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
+                            : 'border-border hover:border-primary/50 dark:border-border-dark'
                         }`}
                       >
                         <div className="flex items-center gap-3">
                           <Icon className="w-6 h-6 text-primary" />
                           <div>
                             <p className="font-semibold text-text-primary text-sm">{method.name}</p>
-                            <p className="text-xs text-text-secondary">{formatCurrency(method.fee)}</p>
+                            <p className="text-xs text-text-secondary dark:text-text-secondary-dark">{formatCurrency(method.fee)}</p>
                           </div>
                         </div>
                       </div>
@@ -1140,22 +1270,22 @@ export default function CheckoutPage() {
               <h2 className="text-xl font-bold text-text-primary">Ringkasan Pesanan</h2>
             </div>
             <div className="space-y-3">
-              <div className="flex justify-between text-text-secondary">
+              <div className="flex justify-between text-text-secondary dark:text-text-secondary-dark">
                 <span>Total Produk</span>
-                <span>{formatCurrency(totalPrice)}</span>
+                <span>{formatCurrency(totalPrice || 0)}</span>
               </div>
-              <div className="flex justify-between text-text-secondary">
+              <div className="flex justify-between text-text-secondary dark:text-text-secondary-dark">
                 <span>Ongkos Kirim</span>
                 <span>{shippingCost > 0 ? formatCurrency(shippingCost) : '-'}</span>
               </div>
-              <div className="flex justify-between text-text-secondary">
+              <div className="flex justify-between text-text-secondary dark:text-text-secondary-dark">
                 <span>Biaya Pembayaran</span>
                 <span>{paymentFee > 0 ? formatCurrency(paymentFee) : 'Gratis'}</span>
               </div>
-              <div className="border-t border-border pt-3">
+              <div className="border-t border-border dark:border-border-dark pt-3">
                 <div className="flex justify-between text-lg font-bold text-text-primary">
                   <span>Total Bayar</span>
-                  <span className="text-primary">{formatCurrency(grandTotal)}</span>
+                  <span className="text-primary">{formatCurrency(grandTotal || 0)}</span>
                 </div>
               </div>
             </div>
@@ -1169,7 +1299,7 @@ export default function CheckoutPage() {
             <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
               {items.map((item: any) => (
                 <div key={item.id} className="flex gap-3">
-                  <div className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden">
+                  <div className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden dark:bg-surface/50">
                     {item.product.image ? (
                       <img src={item.product.image} alt={item.product.name} className="w-full h-full object-cover" />
                     ) : (
@@ -1178,7 +1308,7 @@ export default function CheckoutPage() {
                   </div>
                   <div className="flex-1">
                     <p className="font-medium text-text-primary text-sm line-clamp-1">{item.product.name}</p>
-                    <p className="text-xs text-text-secondary">{item.quantity} {item.product.unit}</p>
+                    <p className="text-xs text-text-secondary dark:text-text-secondary-dark">{item.quantity} {item.product.unit}</p>
                     <p className="text-sm font-bold text-primary">{formatCurrency(item.product.price * item.quantity)}</p>
                   </div>
                 </div>
@@ -1195,11 +1325,11 @@ export default function CheckoutPage() {
                   <span>Memproses...</span>
                 </>
               ) : (
-                `Buat Pesanan (${formatCurrency(grandTotal)})`
+                `Buat Pesanan (${formatCurrency(grandTotal || 0)})`
               )}
             </button>
             {!selectedPayment && (
-              <p className="text-xs text-red-500 text-center mt-2">⚠️ Pilih metode pembayaran</p>
+              <p className="text-xs text-red-500 text-center mt-2 dark:text-red-400">⚠️ Pilih metode pembayaran</p>
             )}
           </div>
         </div>

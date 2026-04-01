@@ -1,11 +1,21 @@
+// src/app/api/address/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import pool from '@/lib/db';
-import { handleAPIError } from '@/lib/middleware'; // Import middleware kamu
+import { handleAPIError } from '@/lib/middleware';
+
+// Validasi villageCode (10 digit untuk API ongkir)
+function validateVillageCode(code: string): boolean {
+  return /^\d{10}$/.test(code);
+}
+
+// Validasi location code (2-8 digit numeric)
+function validateLocationCode(code: string): boolean {
+  return /^\d{2,8}$/.test(code);
+}
 
 export async function GET(req: NextRequest) {
   try {
-    // 1. Verifikasi token
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -17,16 +27,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
     }
 
-    const userIdString = decoded.sub;
-    const userId = parseInt(userIdString, 10);
-    if (isNaN(userId)) {
-      return NextResponse.json({ success: false, error: 'Invalid user ID' }, { status: 400 });
-    }
+    const userId = decoded.sub;
 
-    // 2. Ambil alamat dari database
-    // ✅ Tambahkan villageCode ke dalam SELECT
     const [rows] = await pool.execute(
-      'SELECT id, detail, cityId, districtId, villageCode, province, zipCode FROM address WHERE userId = ?',
+      `SELECT 
+        id, userId, detail, villageCode, 
+        province, city, district, 
+        zipCode, recipientName, recipientPhone, 
+        isDefault, createdAt, updatedAt 
+      FROM address 
+      WHERE userId = ? 
+      ORDER BY isDefault DESC, createdAt DESC`,
       [userId]
     );
 
@@ -37,7 +48,7 @@ export async function GET(req: NextRequest) {
 
   } catch (err: any) {
     console.error('Error fetching addresses:', err);
-    return handleAPIError(err, 'GET /api/address'); // ✅ Gunakan middleware
+    return handleAPIError(err, 'GET /api/address');
   }
 }
 
@@ -55,35 +66,100 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = decoded.sub;
-    // ✅ Ambil villageCode dari body request
-    const { detail, cityId, districtId, villageCode, province, zipCode } = await req.json();
+    const body = await req.json();
 
-    // ✅ Masukkan villageCode ke dalam INSERT
+    // ✅ Validasi required fields
+    const requiredFields = [
+      'villageCode', 'province', 'city', 'district',
+      'detail', 'zipCode', 'recipientName', 'recipientPhone'
+    ];
+    
+    for (const field of requiredFields) {
+      const value = body[field];
+      if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+        return NextResponse.json(
+          { success: false, error: `${field} is required` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // ✅ Validasi villageCode (10 digit)
+    if (!validateVillageCode(body.villageCode)) {
+      return NextResponse.json(
+        { success: false, error: 'Kode desa tidak valid. Harus 10 digit angka.' },
+        { status: 400 }
+      );
+    }
+
+    // ✅ Validasi location codes
+    if (!validateLocationCode(body.province)) {
+      return NextResponse.json(
+        { success: false, error: 'Kode provinsi tidak valid.' },
+        { status: 400 }
+      );
+    }
+    if (!validateLocationCode(body.city)) {
+      return NextResponse.json(
+        { success: false, error: 'Kode kota tidak valid.' },
+        { status: 400 }
+      );
+    }
+    if (!validateLocationCode(body.district)) {
+      return NextResponse.json(
+        { success: false, error: 'Kode kecamatan tidak valid.' },
+        { status: 400 }
+      );
+    }
+
+    // ✅ FIX: 10 kolom + 2 timestamp = 12 total, 10 placeholders + 2 CURRENT_TIMESTAMP = 12 values
     const [result] = await pool.execute(
-      'INSERT INTO address (userId, detail, cityId, districtId, villageCode, province, zipCode) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [userId, detail, cityId, districtId, villageCode, province, zipCode]
+      `INSERT INTO address (
+        userId, villageCode, 
+        province, city, district, 
+        detail, zipCode, 
+        recipientName, recipientPhone, 
+        isDefault, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [
+        userId,                        // 1. userId
+        body.villageCode?.trim(),      // 2. villageCode
+        body.province?.trim(),         // 3. province (CODE)
+        body.city?.trim(),           // 4. city (CODE)
+        body.district?.trim(),       // 5. district (CODE)
+        body.detail?.trim(),           // 6. detail
+        body.zipCode?.trim(),          // 7. zipCode
+        body.recipientName?.trim(),    // 8. recipientName
+        body.recipientPhone?.trim(),   // 9. recipientPhone
+        body.isDefault || false        // 10. isDefault
+        // createdAt & updatedAt = CURRENT_TIMESTAMP (otomatis)
+      ]
     );
 
     const insertedId = (result as any).insertId;
 
-    // ✅ Ambil data alamat yang baru ditambahkan (termasuk villageCode)
     const [rows] = await pool.execute(
-      'SELECT id, detail, cityId, districtId, villageCode, province, zipCode, createdAt, updatedAt FROM address WHERE id = ?',
+      `SELECT 
+        id, userId, detail, villageCode, 
+        province, city, district, 
+        zipCode, recipientName, recipientPhone, 
+        isDefault, createdAt, updatedAt 
+      FROM address WHERE id = ?`,
       [insertedId]
     );
 
     return NextResponse.json({
       success: true,
-      address: Array.isArray(rows) && rows.length > 0 ? rows[0] : null
+      address: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
+      message: 'Alamat berhasil ditambahkan'
     });
 
   } catch (err: any) {
     console.error('Error adding address:', err);
-    return handleAPIError(err, 'POST /api/address'); // ✅ Gunakan middleware
+    return handleAPIError(err, 'POST /api/address');
   }
 }
 
-// ✅ Tambahkan method PUT
 export async function PUT(req: NextRequest) {
   try {
     const authHeader = req.headers.get('Authorization');
@@ -98,129 +174,77 @@ export async function PUT(req: NextRequest) {
     }
 
     const userId = decoded.sub;
-    const { id, detail, cityId, districtId, villageCode, province, zipCode } = await req.json();
+    const body = await req.json();
 
-    if (!id) {
+    if (!body.id) {
       throw new Error('Address ID is required for update.');
     }
 
-    // Verifikasi apakah alamat milik user ini
+    // ✅ Verifikasi kepemilikan
     const [checkRows] = await pool.execute(
       'SELECT id FROM address WHERE id = ? AND userId = ?',
-      [id, userId]
+      [body.id, userId]
     );
 
     if ((checkRows as any[]).length === 0) {
       throw new Error('Address not found or does not belong to user.');
     }
 
+    if (body.villageCode && !validateVillageCode(body.villageCode)) {
+      throw new Error('Kode desa tidak valid. Harus 10 digit angka.');
+    }
+
+    // ✅ FIX: 10 kolom update + 1 timestamp + 2 WHERE = 13 total, 10 placeholders + 1 CURRENT_TIMESTAMP + 2 WHERE = 13 values
     const [result] = await pool.execute(
-      'UPDATE address SET detail = ?, cityId = ?, districtId = ?, villageCode = ?, province = ?, zipCode = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?',
-      [detail, cityId, districtId, villageCode, province, zipCode, id, userId]
+      `UPDATE address SET 
+        villageCode = ?, 
+        province = ?, city = ?, district = ?, 
+        detail = ?, zipCode = ?, 
+        recipientName = ?, recipientPhone = ?, 
+        isDefault = ?, 
+        updatedAt = CURRENT_TIMESTAMP 
+      WHERE id = ? AND userId = ?`,
+      [
+        body.villageCode?.trim(),      // 1
+        body.province?.trim(),         // 2
+        body.city?.trim(),           // 3
+        body.district?.trim(),       // 4
+        body.detail?.trim(),           // 5
+        body.zipCode?.trim(),          // 6
+        body.recipientName?.trim(),    // 7
+        body.recipientPhone?.trim(),   // 8
+        body.isDefault || false,       // 9
+        body.id,                       // 10 (WHERE id = ?)
+        userId                         // 11 (WHERE userId = ?)
+      ]
     );
 
     if ((result as any).affectedRows === 0) {
       throw new Error('Address not found or could not be updated.');
     }
 
-    // Ambil data alamat yang diperbarui
     const [updatedRows] = await pool.execute(
-      'SELECT id, detail, cityId, districtId, villageCode, province, zipCode, createdAt, updatedAt FROM address WHERE id = ?',
-      [id]
+      `SELECT 
+        id, userId, detail, villageCode, 
+        province, city, district, 
+        zipCode, recipientName, recipientPhone, 
+        isDefault, createdAt, updatedAt 
+      FROM address WHERE id = ?`,
+      [body.id]
     );
 
     return NextResponse.json({
       success: true,
       address: Array.isArray(updatedRows) && updatedRows.length > 0 ? updatedRows[0] : null,
-      message: 'Address updated successfully.'
+      message: 'Alamat berhasil diperbarui'
     });
 
   } catch (err: any) {
     console.error('Error updating address:', err);
-    return handleAPIError(err, 'PUT /api/address'); // ✅ Gunakan middleware
+    return handleAPIError(err, 'PUT /api/address');
   }
 }
 
-// ✅ Tambahkan method PATCH
-export async function PATCH(req: NextRequest) {
-  try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = verifyAccessToken(token);
-    if (!decoded) {
-      throw new Error('Invalid token');
-    }
-
-    const userId = decoded.sub;
-    const { id, ...updates } = await req.json(); // Ambil id dan field lain yang ingin diupdate
-
-    if (!id) {
-      throw new Error('Address ID is required for update.');
-    }
-
-    // Bangun query dinamis berdasarkan field yang dikirim
-    const updateFields = Object.keys(updates);
-    if (updateFields.length === 0) {
-      throw new Error('No fields provided for update.');
-    }
-
-    let query = 'UPDATE address SET ';
-    const values: any[] = [];
-    updateFields.forEach(field => {
-      // Validasi field yang boleh diupdate
-      if (['detail', 'cityId', 'districtId', 'villageCode', 'province', 'zipCode'].includes(field)) {
-        query += `${field} = ?, `;
-        values.push(updates[field]);
-      }
-    });
-
-    if (values.length === 0) {
-      throw new Error('No valid fields provided for update.');
-    }
-
-    query = query.slice(0, -2); // Hapus ', ' terakhir
-    query += ' WHERE id = ? AND userId = ?';
-    values.push(id, userId);
-
-    // Verifikasi apakah alamat milik user ini
-    const [checkRows] = await pool.execute(
-      'SELECT id FROM address WHERE id = ? AND userId = ?',
-      [id, userId]
-    );
-
-    if ((checkRows as any[]).length === 0) {
-      throw new Error('Address not found or does not belong to user.');
-    }
-
-    const [result] = await pool.execute(query, values);
-
-    if ((result as any).affectedRows === 0) {
-      throw new Error('Address not found or could not be updated.');
-    }
-
-    // Ambil data alamat yang diperbarui
-    const [updatedRows] = await pool.execute(
-      'SELECT id, detail, cityId, districtId, villageCode, province, zipCode, createdAt, updatedAt FROM address WHERE id = ?',
-      [id]
-    );
-
-    return NextResponse.json({
-      success: true,
-      address: Array.isArray(updatedRows) && updatedRows.length > 0 ? updatedRows[0] : null,
-      message: 'Address updated successfully.'
-    });
-
-  } catch (err: any) {
-    console.error('Error partially updating address:', err);
-    return handleAPIError(err, 'PATCH /api/address'); // ✅ Gunakan middleware
-  }
-}
-
-// ✅ Tambahkan method DELETE
 export async function DELETE(req: NextRequest) {
   try {
     const authHeader = req.headers.get('Authorization');
@@ -235,13 +259,12 @@ export async function DELETE(req: NextRequest) {
     }
 
     const userId = decoded.sub;
-    const { id } = await req.json(); // Ambil id alamat dari body
+    const { id } = await req.json();
 
     if (!id) {
       throw new Error('Address ID is required for deletion.');
     }
 
-    // Verifikasi apakah alamat milik user ini
     const [checkRows] = await pool.execute(
       'SELECT id FROM address WHERE id = ? AND userId = ?',
       [id, userId]
@@ -262,11 +285,11 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Address deleted successfully.'
+      message: 'Alamat berhasil dihapus'
     });
 
   } catch (err: any) {
     console.error('Error deleting address:', err);
-    return handleAPIError(err, 'DELETE /api/address'); // ✅ Gunakan middleware
+    return handleAPIError(err, 'DELETE /api/address');
   }
 }

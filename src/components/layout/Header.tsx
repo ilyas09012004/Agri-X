@@ -26,7 +26,6 @@ const navItems = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/katalog', label: 'Katalog', icon: Sprout },
   { href: '/forum', label: 'Forum', icon: MessageCircle },
-  { href: '/wishlist', label: 'Wishlist', icon: Heart },
   { href: '/akun', label: 'Akun', icon: User },
 ];
 
