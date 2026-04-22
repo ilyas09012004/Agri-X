@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
         `, [order.id]);
 
         const [addressRows] = await pool.execute(`
-          SELECT detail, cityId, districtId, villageCode, province, zipCode
+          SELECT detail, city, district, villageCode, province, zipCode
           FROM address
           WHERE id = ?
         `, [order.addressId]);
@@ -136,8 +136,8 @@ export async function GET(req: NextRequest) {
           ...order,
           address: {
             detail: address.detail || '',
-            cityId: address.cityId || '',
-            districtId: address.districtId || '',
+            city: address.city || '',
+            district: address.district || '',
             villageCode: address.villageCode || '',
             province: address.province || '',
             zipCode: address.zipCode || '',
@@ -352,33 +352,83 @@ export async function POST(req: NextRequest) {
       if (paymentMethod !== 'cod') {
         console.log('Generating Midtrans payment URL...');
         
-        // Ambil data user untuk Midtrans
-        const [userRows] = await connection.execute(
-          `SELECT name, email, phone FROM users WHERE id = ?`,
-          [userId]
+        // ✅ FIX: Ambil data user DAN address (dengan recipientPhone) untuk Midtrans
+        const [orderDetails] = await connection.execute(
+          `SELECT 
+             u.name as user_name, 
+             u.email as user_email,
+             a.recipientPhone as recipient_phone,
+             a.detail as address_detail,
+             a.city as address_city,
+             a.district as address_district,
+             a.villageCode as address_village,
+             a.province as address_province,
+             a.zipCode as address_zip
+           FROM orders o
+           JOIN users u ON o.userId = u.id
+           JOIN address a ON o.addressId = a.id
+           WHERE o.id = ?`,
+          [orderId] // orderId dari hasil insert order sebelumnya
         );
-        const userData = (userRows as any[])[0];
+
+        const orderDetailsData = (orderDetails as any[])[0];
 
         // Format order_id untuk Midtrans
         const midtransOrderId = `AGR-${orderId}-${Date.now()}`;
 
-        // Parameter untuk Midtrans Snap
+        // ✅ FIX: Gunakan recipient_phone dari address (bukan phone dari users)
+        // ✅ FIX: Format tanggal untuk Midtrans
+        const formatMidtransDateTime = (date: Date): string => {
+          const pad = (n: number) => String(n).padStart(2, '0');
+          const year = date.getFullYear();
+          const month = pad(date.getMonth() + 1);
+          const day = pad(date.getDate());
+          const hours = pad(date.getHours());
+          const minutes = pad(date.getMinutes());
+          const seconds = pad(date.getSeconds());
+          return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} +0700`;
+        };
+
+        // ✅ Parameter untuk Midtrans Snap (FIXED)
         const parameter = {
           transaction_details: {
             order_id: midtransOrderId,
             gross_amount: grandTotal,
           },
           customer_details: {
-            first_name: userData?.name || 'Customer',
-            email: userData?.email || '',
-            phone: userData?.phone || '',
+            first_name: orderDetailsData?.user_name || 'Customer',
+            email: orderDetailsData?.user_email || '',
+            phone: orderDetailsData?.recipient_phone || '',
+            billing_address: {
+              first_name: orderDetailsData?.user_name || 'Customer',
+              address: orderDetailsData?.address_detail || '',
+              city: orderDetailsData?.address_city || '',
+              postal_code: orderDetailsData?.address_zip || '',
+              phone: orderDetailsData?.recipient_phone || '',
+              country_code: 'IDN'
+            },
+            shipping_address: {
+              first_name: orderDetailsData?.user_name || 'Customer',
+              address: orderDetailsData?.address_detail || '',
+              city: orderDetailsData?.address_city || '',
+              postal_code: orderDetailsData?.address_zip || '',
+              phone: orderDetailsData?.recipient_phone || '',
+              country_code: 'IDN'
+            }
           },
           enabled_payments: [paymentGateway === 'qris' ? 'qris' : paymentGateway],
+          // ✅ FIX: Format start_time sesuai requirement Midtrans
           expiry: {
-            start_time: new Date().toISOString(),
+            start_time: formatMidtransDateTime(new Date()), // "2026-01-22 17:30:00 +0700"
             unit: 'hours',
             duration: 24,
           },
+          // ✅ Opsional: Tambahkan custom_expiry untuk batas waktu pembayaran
+          custom_expiry: {
+            start_time: formatMidtransDateTime(new Date()),
+            unit: 'hours',
+            duration: 24,
+          }
         };
 
         console.log('Midtrans parameter:', JSON.stringify(parameter, null, 2));
@@ -397,7 +447,7 @@ export async function POST(req: NextRequest) {
 
         // ✅ Update order dengan transaction ID, payment URL, dan VA number
         await connection.execute(
-          `UPDATE orders SET transactionId = ?, paymentUrl = ?, vaNumber = ? WHERE id = ?`,
+          `UPDATE orders SET orderId = ?, paymentUrl = ?, vaNumber = ? WHERE id = ?`,
           [transactionId, paymentUrl, vaNumber, orderId]
         );
 

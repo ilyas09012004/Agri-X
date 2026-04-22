@@ -14,11 +14,15 @@ import {
   Check,
   RefreshCw,
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 
-// Konfigurasi status pembayaran
+// ==========================================
+// ✅ KONFIGURASI STATUS & METODE PEMBAYARAN
+// ==========================================
+
 const paymentStatusConfig: Record<string, {
   label: string;
   color: string;
@@ -182,6 +186,10 @@ const paymentMethodConfig: Record<string, {
   },
 };
 
+// ==========================================
+// ✅ KOMPONEN UTAMA
+// ==========================================
+
 export default function OrderPaymentPage() {
   const params = useParams();
   const router = useRouter();
@@ -195,8 +203,11 @@ export default function OrderPaymentPage() {
     seconds: number;
   }>({ hours: 0, minutes: 0, seconds: 0 });
   const [isExpired, setIsExpired] = useState(false);
-
-  const checkPaymentInterval = useRef<NodeJS.Timeout | null>(null);
+  
+  // ✅ State baru untuk redirect
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [redirectError, setRedirectError] = useState<string | null>(null);
+  const hasRedirected = useRef(false); // Prevent multiple redirects
 
   // Fetch order data
   const fetchOrder = async () => {
@@ -229,6 +240,62 @@ export default function OrderPaymentPage() {
       setIsLoading(false);
     }
   };
+
+  // ✅ Fungsi redirect ke Midtrans
+  const redirectToMidtrans = (paymentUrl: string) => {
+    if (!paymentUrl || hasRedirected.current) return;
+    
+    setIsRedirecting(true);
+    setRedirectError(null);
+    hasRedirected.current = true;
+    
+    // Coba redirect langsung
+    try {
+      // Opsional: Simpan ke session storage untuk tracking
+      sessionStorage.setItem('midtrans_redirect_order', params.id as string);
+      
+      // Redirect ke halaman Midtrans
+      window.location.href = paymentUrl;
+      
+      // Fallback: Jika redirect gagal, buka di new tab setelah 3 detik
+      setTimeout(() => {
+        if (hasRedirected.current) {
+          window.open(paymentUrl, '_blank', 'noopener,noreferrer');
+          setRedirectError('Redirect otomatis gagal. Halaman pembayaran dibuka di tab baru.');
+          setIsRedirecting(false);
+        }
+      }, 3000);
+    } catch (error) {
+      console.error('Redirect error:', error);
+      setRedirectError('Gagal membuka halaman pembayaran. Silakan klik tombol di bawah.');
+      setIsRedirecting(false);
+      hasRedirected.current = false;
+    }
+  };
+
+  // ✅ Auto-redirect effect
+  useEffect(() => {
+    if (!order || isLoading || isRedirecting) return;
+    
+    // Hanya redirect jika:
+    // 1. Status pending/belum bayar
+    // 2. Ada paymentUrl dari Midtrans
+    // 3. Belum pernah redirect
+    // 4. Bukan COD (COD tidak perlu redirect)
+    if (
+      order.paymentStatus === 'pending' && 
+      order.paymentUrl && 
+      !hasRedirected.current &&
+      order.paymentMethod !== 'cod'
+    ) {
+      // Beri delay 1.5 detik agar user lihat halaman dulu
+      const timer = setTimeout(() => {
+        redirectToMidtrans(order.paymentUrl);
+      }, 1500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [order, isLoading, isRedirecting]);
 
   // Check payment status
   const checkPaymentStatus = async () => {
@@ -265,7 +332,6 @@ export default function OrderPaymentPage() {
       await navigator.clipboard.writeText(text);
       setCopiedField(field);
       setTimeout(() => setCopiedField(null), 2000);
-      alert('Berhasil disalin!');
     } catch (error) {
       console.error('Copy error:', error);
     }
@@ -303,14 +369,10 @@ export default function OrderPaymentPage() {
   useEffect(() => {
     if (!order || order.paymentStatus === 'paid' || isExpired) return;
 
-    checkPaymentStatus(); // Initial check
-    checkPaymentInterval.current = setInterval(checkPaymentStatus, 10000);
+    checkPaymentStatus();
+    const interval = setInterval(checkPaymentStatus, 10000);
 
-    return () => {
-      if (checkPaymentInterval.current) {
-        clearInterval(checkPaymentInterval.current);
-      }
-    };
+    return () => clearInterval(interval);
   }, [order, isExpired]);
 
   // Initial fetch
@@ -318,6 +380,7 @@ export default function OrderPaymentPage() {
     fetchOrder();
   }, [params.id]);
 
+  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -330,6 +393,7 @@ export default function OrderPaymentPage() {
     return null;
   }
 
+  // ✅ Akses config yang sudah didefinisikan di atas
   const statusInfo = paymentStatusConfig[order.paymentStatus] || paymentStatusConfig.pending;
   const StatusIcon = statusInfo.icon;
   const paymentMethod = paymentMethodConfig[order.paymentGateway] || paymentMethodConfig.cod;
@@ -361,7 +425,6 @@ export default function OrderPaymentPage() {
           </div>
           <p className="text-center text-text-secondary">{statusInfo.description}</p>
 
-          {/* Success Message */}
           {order.paymentStatus === 'paid' && (
             <div className="mt-4 text-center">
               <p className="text-green-600 dark:text-green-400 font-semibold">
@@ -371,8 +434,29 @@ export default function OrderPaymentPage() {
           )}
         </div>
 
+        {/* Redirect Loading State */}
+        {isRedirecting && order.paymentStatus === 'pending' && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6 mb-6 text-center">
+            <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-3" />
+            <h3 className="text-lg font-bold text-blue-600 mb-2">Mengalihkan ke Pembayaran...</h3>
+            <p className="text-blue-700 dark:text-blue-300 text-sm">
+              Jika halaman tidak terbuka otomatis, klik tombol di bawah.
+            </p>
+          </div>
+        )}
+
+        {/* Redirect Error */}
+        {redirectError && (
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border-2 border-yellow-200 dark:border-yellow-800 rounded-2xl p-4 mb-6">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <p className="text-yellow-700 dark:text-yellow-300 text-sm">{redirectError}</p>
+            </div>
+          </div>
+        )}
+
         {/* Countdown Timer */}
-        {order.paymentStatus === 'pending' && !isExpired && (
+        {order.paymentStatus === 'pending' && !isExpired && !isRedirecting && (
           <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-2xl p-6 mb-6">
             <div className="flex items-center justify-center gap-2 mb-4">
               <Clock className="w-6 h-6 text-red-600" />
@@ -424,9 +508,8 @@ export default function OrderPaymentPage() {
         )}
 
         {/* Payment Method Card */}
-        {order.paymentStatus === 'pending' && !isExpired && (
+        {order.paymentStatus === 'pending' && !isExpired && !isRedirecting && (
           <>
-            {/* Payment Info */}
             <div className="card mb-6">
               <div className="flex items-center gap-3 mb-4">
                 <div className={`w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center`}>
@@ -438,18 +521,17 @@ export default function OrderPaymentPage() {
                 </div>
               </div>
 
-              {/* VA Number / QR Code */}
-              {(order.paymentGateway?.includes('va') || order.vaNumber) && (
+              {/* VA Number */}
+              {(order.paymentGateway?.includes('va') || order.vaNumber) && order.vaNumber && (
                 <div className="bg-surface rounded-xl p-4 mb-4">
                   <p className="text-sm text-text-secondary mb-2">Nomor Virtual Account</p>
                   <div className="flex items-center gap-3">
-                    <div className="flex-1 bg-background rounded-lg p-4 font-mono text-lg font-bold text-text-primary text-center">
-                      {order.vaNumber || 'Menunggu生成...'}
+                    <div className="flex-1 bg-background rounded-lg p-4 font-mono text-lg font-bold text-text-primary text-center break-all">
+                      {order.vaNumber}
                     </div>
                     <button
-                      onClick={() => order.vaNumber && copyToClipboard(order.vaNumber, 'va')}
+                      onClick={() => copyToClipboard(order.vaNumber!, 'va')}
                       className="w-12 h-12 rounded-lg bg-primary text-white flex items-center justify-center hover:bg-secondary transition-colors"
-                      disabled={!order.vaNumber}
                     >
                       {copiedField === 'va' ? (
                         <Check className="w-5 h-5" />
@@ -461,7 +543,7 @@ export default function OrderPaymentPage() {
                 </div>
               )}
 
-              {/* QR Code for QRIS/E-Wallet */}
+              {/* QR Code */}
               {(order.paymentGateway === 'qris' || ['gopay', 'ovo', 'dana'].includes(order.paymentGateway)) && order.qrCode && (
                 <div className="bg-surface rounded-xl p-4 mb-4 text-center">
                   <p className="text-sm text-text-secondary mb-4">Scan QR Code untuk membayar</p>
@@ -472,9 +554,6 @@ export default function OrderPaymentPage() {
                       className="w-48 h-48 object-contain"
                     />
                   </div>
-                  <p className="text-xs text-text-secondary mt-4">
-                    Gunakan aplikasi e-wallet apapun yang mendukung QRIS
-                  </p>
                 </div>
               )}
 
@@ -496,17 +575,16 @@ export default function OrderPaymentPage() {
                 </ol>
               </div>
 
-              {/* Pay Button */}
+              {/* ✅ Manual Pay Button (Fallback) */}
               {order.paymentUrl && (
-                <a
-                  href={order.paymentUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => redirectToMidtrans(order.paymentUrl)}
+                  disabled={isRedirecting}
                   className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
                 >
                   <ExternalLink className="w-5 h-5" />
-                  Buka Halaman Pembayaran
-                </a>
+                  {isRedirecting ? 'Mengalihkan...' : 'Buka Halaman Pembayaran'}
+                </button>
               )}
             </div>
 
@@ -565,12 +643,6 @@ export default function OrderPaymentPage() {
                   </p>
                 </div>
               </div>
-            </div>
-            <div className="space-y-2 text-text-secondary text-sm">
-              <p>✓ Pesanan akan segera diproses</p>
-              <p>✓ Kurir akan menghubungi sebelum pengiriman</p>
-              <p>✓ Bayar tunai saat barang diterima</p>
-              <p>✓ Dapatkan bukti pembayaran dari kurir</p>
             </div>
           </div>
         )}

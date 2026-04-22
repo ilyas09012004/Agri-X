@@ -41,8 +41,18 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const category = searchParams.get('category');
+    const categoryId = searchParams.get('category_id'); // ✅ Baru: support filter by category_id
     const limit = searchParams.get('limit');
     const offset = searchParams.get('offset');
+    
+    // ✅ Tambah: Parse sort & order params
+    const sort = searchParams.get('sort') || 'sold_count'; // Default: urutkan by paling laris
+    const order = searchParams.get('order') || 'desc'; // Default: descending
+
+    // ✅ Whitelist field yang boleh di-sort (anti SQL injection)
+    const validSortFields = ['created_at', 'price', 'sold_count', 'rating', 'name', 'stock'];
+    const sortBy = validSortFields.includes(sort) ? sort : 'sold_count';
+    const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     let query = `
       SELECT 
@@ -51,7 +61,9 @@ export async function GET(req: NextRequest) {
         p.description, 
         p.price, 
         p.unit, 
-        p.stock, 
+        p.stock,
+        p.sold_count,
+        p.category_id,  -- ✅ Tambah field category_id
         p.min_order, 
         p.seller_id,
         u.name as user_name,
@@ -67,12 +79,17 @@ export async function GET(req: NextRequest) {
     `;
     const params: any[] = ['deleted'];
 
-    if (category) {
+    // ✅ Filter by category_id (prioritas) atau category string (backward compatibility)
+    if (categoryId && !isNaN(parseInt(categoryId))) {
+      query += ' AND p.category_id = ?';
+      params.push(parseInt(categoryId));
+    } else if (category) {
       query += ' AND p.category = ?';
       params.push(category);
     }
 
-    query += ' ORDER BY p.created_at DESC';
+    // ✅ Tambah ORDER BY dengan nilai yang sudah divalidasi (aman dari SQL injection)
+    query += ` ORDER BY ${sortBy} ${sortOrder}`;
 
     if (limit) {
       const limitNum = parseInt(limit);
@@ -95,14 +112,16 @@ export async function GET(req: NextRequest) {
     const products = rows as any[];
 
     const formattedProducts = products.map(p => ({
-      id: typeof p.id === 'number' ? p.id : parseInt(p.id, 10), // Pastikan id numerik
+      id: typeof p.id === 'number' ? p.id : parseInt(p.id, 10),
       name: p.name,
       description: p.description,
       price: p.price,
       unit: p.unit,
       stock: p.stock,
+      sold_count: p.sold_count,
+      category_id: typeof p.category_id === 'number' ? p.category_id : (p.category_id ? parseInt(p.category_id, 10) : null), // ✅ Include category_id in response
       min_order: p.min_order,
-      seller_id: typeof p.seller_id === 'number' ? p.seller_id : parseInt(p.seller_id, 10), // Pastikan seller_id numerik
+      seller_id: typeof p.seller_id === 'number' ? p.seller_id : parseInt(p.seller_id, 10),
       user_name: p.user_name,
       harvest_date: p.harvest_date ? new Date(p.harvest_date).toISOString().split('T')[0] : null,
       image_path: p.image_path,

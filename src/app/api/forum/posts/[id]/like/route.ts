@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { verifyAccessToken } from '@/utils/jwt.util';
-import { handleAPIError } from '@/lib/middleware';
+import { NotificationService } from '@/lib/notification.service';
 
 type Params = {
   params: Promise<{ id: string }>;
@@ -10,71 +10,79 @@ type Params = {
 
 export async function POST(req: NextRequest, { params }: Params) {
   try {
+    // ✅ 1. Auth check
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
     if (!decoded) {
-      throw new Error('Invalid token');
+      return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
     }
 
-    const userId = decoded.sub;
+    const userId = parseInt(decoded.sub);
     const { id } = await params;
 
-    // Check if post exists
+    // ✅ 2. Get post details
     const [posts] = await pool.execute(
-      'SELECT id FROM forum_posts WHERE id = ? AND is_deleted = FALSE',
+      'SELECT user_id, title FROM forum_posts WHERE id = ? AND is_deleted = FALSE',
       [id]
     );
+    const post = (posts as any[])[0];
 
-    if ((posts as any[]).length === 0) {
-      throw new Error('Post tidak ditemukan');
+    if (!post) {
+      return NextResponse.json({ success: false, error: 'Post not found' }, { status: 404 });
     }
 
-    // Check if already liked
-    const [existingLike] = await pool.execute(
-      'SELECT * FROM forum_likes WHERE user_id = ? AND post_id = ?',
+    // ✅ 3. Check if already liked
+    const [existingLikes] = await pool.execute(
+      'SELECT id FROM forum_likes WHERE user_id = ? AND post_id = ?',
       [userId, id]
     );
 
-    if ((existingLike as any[]).length > 0) {
-      // Unlike
-      await pool.execute(
-        'DELETE FROM forum_likes WHERE user_id = ? AND post_id = ?',
-        [userId, id]
-      );
-      await pool.execute(
-        'UPDATE forum_posts SET likes = likes - 1 WHERE id = ?',
-        [id]
-      );
+    let liked = false;
 
-      return NextResponse.json({
-        success: true,
-        liked: false,
-        message: 'Like dihapus',
-      });
+    if ((existingLikes as any[]).length > 0) {
+      // Unlike
+      await pool.execute('DELETE FROM forum_likes WHERE user_id = ? AND post_id = ?', [userId, id]);
+      await pool.execute('UPDATE forum_posts SET likes = likes - 1 WHERE id = ?', [id]);
+      liked = false;
     } else {
       // Like
-      await pool.execute(
-        'INSERT INTO forum_likes (user_id, post_id) VALUES (?, ?)',
-        [userId, id]
-      );
-      await pool.execute(
-        'UPDATE forum_posts SET likes = likes + 1 WHERE id = ?',
-        [id]
-      );
+      await pool.execute('INSERT INTO forum_likes (user_id, post_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP(3))', [userId, id]);
+      await pool.execute('UPDATE forum_posts SET likes = likes + 1 WHERE id = ?', [id]);
+      liked = true;
 
-      return NextResponse.json({
-        success: true,
-        liked: true,
-        message: 'Post disukai',
-      });
+      // ✅ Send notification to post owner (if not liking own post)
+      if (post.user_id !== userId) {
+        const [users] = await pool.execute('SELECT name FROM users WHERE id = ?', [userId]);
+        const liker = (users as any[])[0];
+
+        await NotificationService.send({
+          userId: post.user_id,
+          senderId: userId,
+          type: 'forum',
+          templateCode: 'forum_like',
+          variables: {
+            username: liker?.name || 'Someone',
+            post_title: post.title.substring(0, 50),
+            post_id: id,
+          },
+          actionType: 'forum_like',
+          referenceId: id,
+        });
+      }
     }
+
+    return NextResponse.json({
+      success: true,
+      liked,
+    });
+
   } catch (error: any) {
-    console.error('Error liking post:', error);
-    return handleAPIError(error, 'POST /api/forum/posts/[id]/like');
+    console.error('Like post error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

@@ -20,7 +20,6 @@ import { getCookie } from '@/lib/auth';
 import { useAuth } from '@/context/AuthContext';
 import { productAPI, reviewAPI } from '@/lib/api';
 import { MobileNav } from '@/components/layout/MobileNav';
-import { ThemeToggle } from '@/components/shared/ThemeToggle';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -716,7 +715,6 @@ export default function ProductDetailPage() {
       </main>
 
       <MobileNav />
-      <ThemeToggle />
     </div>
   );
 }

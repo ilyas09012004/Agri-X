@@ -1,3 +1,4 @@
+// src/app/api/forum/posts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { verifyAccessToken } from '@/utils/jwt.util';
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '10');
     const offset = (page - 1) * limit;
-    const userId = searchParams.get('userId'); // Untuk fetch post user tertentu
+    const userId = searchParams.get('userId');
 
     // ✅ Ambil info user dari token untuk permission check
     const authHeader = req.headers.get('Authorization');
@@ -30,27 +31,22 @@ export async function GET(req: NextRequest) {
     }
 
     // ✅ BUILD STATUS CONDITION
-    // - Public: hanya lihat post 'approved'
-    // - Authenticated user: lihat approved + post sendiri (semua status)
-    // - Admin: bisa lihat semua (opsional, untuk dashboard)
     let statusCondition = 'p.status = \'approved\'';
     const statusParams: any[] = [];
     
     if (currentUser) {
       if (currentUser.role === 'admin') {
-        // Admin bisa lihat semua status (untuk moderation)
         statusCondition = 'p.is_deleted = FALSE';
       } else if (userId && userId === currentUser.id) {
-        // User melihat post sendiri: approved + pending + rejected
         statusCondition = '(p.status = \'approved\' OR p.user_id = ?)';
         statusParams.push(currentUser.id);
       } else {
-        // User melihat forum umum: hanya approved
         statusCondition = 'p.status = \'approved\'';
       }
     }
 
-    // ✅ BUILD MAIN QUERY
+    // ✅ ✅ FIX: BUILD MAIN QUERY dengan normalisasi is_pinned
+    // ✅ Gunakan CASE WHEN atau COALESCE untuk pastikan boolean
     let query = `
       SELECT 
         p.id,
@@ -63,7 +59,8 @@ export async function GET(req: NextRequest) {
         p.views,
         p.likes,
         p.comments_count,
-        p.is_pinned,
+        -- ✅ NORMALISASI: Pastikan is_pinned selalu boolean (0/1 → false/true)
+        CASE WHEN p.is_pinned = 1 THEN TRUE ELSE FALSE END as is_pinned,
         p.is_locked,
         p.created_at,
         p.updated_at,
@@ -88,7 +85,7 @@ export async function GET(req: NextRequest) {
       params.push(category);
     }
 
-    // ✅ FILTER BY SEARCH (title or content)
+    // ✅ FILTER BY SEARCH
     if (search) {
       query += ' AND (p.title LIKE ? OR p.content LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
@@ -134,15 +131,28 @@ export async function GET(req: NextRequest) {
     const [countResult] = await pool.execute(countQuery, countParams);
     const total = (countResult as any)[0]?.total || 0;
 
-    // ✅ FETCH IMAGES FOR EACH POST (optimization: could use JOIN but keeping simple)
+    // ✅ ✅ FIX: FETCH IMAGES dari tabel forum_post_images
     const postsWithImages = await Promise.all(
       (Array.isArray(posts) ? posts : []).map(async (post: any) => {
         const [images] = await pool.execute(
-          'SELECT id, image_url, file_name FROM forum_post_images WHERE post_id = ? ORDER BY id ASC',
+          `SELECT 
+            id, 
+            image_url, 
+            image_alt, 
+            image_source, 
+            display_order, 
+            is_primary,
+            created_at
+          FROM forum_post_images 
+          WHERE post_id = ? 
+          ORDER BY display_order ASC, id ASC`,
           [post.id]
         );
+        
+        // ✅ DOUBLE GUARANTEE: Pastikan is_pinned boolean di JS level juga
         return {
           ...post,
+          is_pinned: Boolean(post.is_pinned),  // ✅ Convert 0/1/null → false/true
           images: Array.isArray(images) ? images : [],
         };
       })
@@ -168,37 +178,84 @@ export async function GET(req: NextRequest) {
 }
 
 // ============================================================================
-// POST: Create new forum post (default status: pending)
+// POST: Create new forum post (dengan multiple images support)
 // ============================================================================
 export async function POST(req: NextRequest) {
   try {
-    // ... (auth dan validasi tetap sama)
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyAccessToken(token);
+    if (!decoded) {
+      return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
+    }
 
     const userId = decoded.sub;
     const { title, content, categoryId, images } = await req.json();
 
-    // ... (validasi title, content, categoryId tetap sama)
+    // ✅ Validasi required fields
+    if (!title?.trim() || !content?.trim() || !categoryId) {
+      return NextResponse.json(
+        { success: false, error: 'Title, content, dan category wajib diisi' },
+        { status: 400 }
+      );
+    }
 
-    // Insert post
+    // ✅ Validasi images jika ada (max 5)
+    if (images && Array.isArray(images)) {
+      if (images.length > 5) {
+        return NextResponse.json(
+          { success: false, error: 'Maksimal 5 gambar per post' },
+          { status: 400 }
+        );
+      }
+      for (const img of images) {
+        if (!img.url || typeof img.url !== 'string' || !img.url.trim()) {
+          return NextResponse.json(
+            { success: false, error: 'Setiap gambar harus memiliki URL yang valid' },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    // ✅ Insert post ke forum_posts
     const [result] = await pool.execute(
-      `INSERT INTO forum_posts (user_id, category_id, title, content)
-       VALUES (?, ?, ?, ?)`,
-      [userId, categoryId, title, content]
+      `INSERT INTO forum_posts (
+        user_id, category_id, title, content,
+        status, is_pinned, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'pending', FALSE, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))`,
+      [userId, categoryId, title.trim(), content.trim()]
     );
 
     const postId = (result as any).insertId;
 
-    // ✅ Insert images ke database
+    // ✅ Insert images ke tabel forum_post_images
     if (images && Array.isArray(images) && images.length > 0) {
-      const imageValues = images.map((imageUrl: string) => [postId, imageUrl]);
+      const imageValues = images.map((img: any, index: number) => [
+        postId,
+        img.url?.trim(),
+        img.alt?.trim() || null,
+        img.source || 'google',
+        null,  // file_size
+        null,  // mime_type
+        index, // display_order
+        index === 0, // is_primary
+      ]);
       
       await pool.execute(
-        'INSERT INTO forum_post_images (post_id, image_url) VALUES ?',
+        `INSERT INTO forum_post_images (
+          post_id, image_url, image_alt, image_source,
+          file_size, mime_type, display_order, is_primary
+        ) VALUES ?`,
         [imageValues]
       );
     }
 
-    // Update category post count
+    // ✅ Update category post count
     await pool.execute(
       'UPDATE forum_categories SET post_count = post_count + 1 WHERE id = ?',
       [categoryId]
@@ -207,7 +264,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       postId,
-      message: 'Diskusi berhasil dibuat',
+      message: 'Diskusi berhasil dibuat dan menunggu persetujuan admin',
     });
 
   } catch (error: any) {

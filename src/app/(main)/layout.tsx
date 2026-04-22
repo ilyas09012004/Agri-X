@@ -1,6 +1,5 @@
 import { Header } from '@/components/layout/Header';
 import { MobileNav } from '@/components/layout/MobileNav';
-import { ThemeToggle } from '@/components/shared/ThemeToggle';
 
 export default function MainLayout({
   children,
@@ -14,7 +13,6 @@ export default function MainLayout({
         {children}
       </main>
       <MobileNav />
-      <ThemeToggle />
-    </div>
+       </div>
   );
 }

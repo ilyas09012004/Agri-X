@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Trash2, Minus, Plus, ShoppingCart, Loader2 } from 'lucide-react';
 import { getCookie } from '@/lib/auth';
+import { useCart } from '@/context/CartContext';
 import { formatCurrency } from '@/lib/utils';
 
 interface CartItem {
@@ -29,6 +30,8 @@ export default function CartPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { totalItems } = useCart();
+  const { totalPrice } = useCart();
 
   useEffect(() => {
     fetchCart();
@@ -166,12 +169,6 @@ export default function CartPage() {
       alert(err.message);
     }
   };
-
-  const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
-  const totalPrice = items.reduce(
-    (sum, item) => sum + item.product.price * item.quantity,
-    0
-  );
 
   if (isLoading) {
     return (

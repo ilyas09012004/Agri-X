@@ -3,57 +3,41 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
+import { useTheme } from 'next-themes';
 import { Header } from '@/components/layout/Header';
 import { MobileNav } from '@/components/layout/MobileNav';
 import { ProductCard } from '@/components/product/ProductCard';
-import { ThemeToggle } from '@/components/shared/ThemeToggle';
 import { 
-  Leaf, 
-  ShoppingCart, 
-  TrendingUp, 
-  Users, 
-  Star,
-  ArrowRight,
-  Sprout,
-  Apple,
-  Wheat,
-  Carrot,
-  Flower,
-  ChefHat,
-  Beef,
-  Egg,
-  Fish,
+  Leaf, ShoppingCart, TrendingUp, Users, Star, ArrowRight,
+  Flame, // ✅ Icon baru untuk "Terlaris"
 } from 'lucide-react';
-import { productAPI, statisticsAPI, reviewAPI, categoryAPI } from '@/lib/api';
+import { productAPI, statisticsAPI, reviewAPI } from '@/lib/api'; // ✅ Hapus categoryAPI
 
 // ============================================
-// TYPE DEFINITIONS
+// ✅ TYPE DEFINITIONS
 // ============================================
 
 interface Product {
   id: number;
   name: string;
+  description?: string;
   price: number;
+  unit: string;
+  stock: number;
+  sold_count: number; // ✅ Field baru: jumlah terjual
+  origin_village_code?: string;
+  min_order: number;
+  seller_id: number;
+  harvest_date?: string;
   image_path?: string;
   category?: string;
   category_id?: number;
-  rating: number;
-  reviews: number;
-  status: 'pre_order' | 'ready_stock' | 'sold_out';
+  rating?: number;
+  reviews?: number;
+  status: 'ready_stock' | 'pre-order' | 'sold_out' | 'deleted';
   badge?: 'Terlaris' | 'Baru';
-  unit?: string;
-}
-
-interface Category {
-  id: number;
-  name: string;
-  slug?: string;
-  description_category?: string;
-  icon?: string;
-  color?: string;
-  display_order?: number;
-  is_active?: boolean;
-  product_count?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface Review {
@@ -74,48 +58,24 @@ interface Statistics {
 }
 
 // ============================================
-// ICON MAPPING (Berdasarkan NAME kategori)
-// ============================================
-
-const categoryIcons: Record<string, any> = {
-  'Sayuran': Sprout,
-  'Buah-buahan': Apple,
-  'Biji-bijian': Wheat,
-  'Umbi-umbian': Carrot,
-  'Bumbu Dapur': ChefHat,
-  'Rempah-rempah': Flower,
-  'Daging & Protein': Beef,
-  'Telur & Susu': Egg,
-  'Ikan & Seafood': Fish,
-};
-
-// ============================================
-// DEFAULT CATEGORIES (Fallback)
-// ============================================
-
-const defaultCategories = [
-  { icon: Sprout, name: 'Sayuran', color: 'bg-green-100' },
-  { icon: Apple, name: 'Buah-buahan', color: 'bg-red-100' },
-  { icon: Wheat, name: 'Biji-bijian', color: 'bg-yellow-100' },
-  { icon: Carrot, name: 'Umbi-umbian', color: 'bg-orange-100' },
-  { icon: Flower, name: 'Rempah-rempah', color: 'bg-purple-100' },
-];
-
-// ============================================
-// MAIN COMPONENT
+// ✅ MAIN COMPONENT
 // ============================================
 
 export default function HomePage() {
   const { user, isAuthenticated } = useAuth();
   const { totalItems } = useCart();
+  const { theme, resolvedTheme } = useTheme();
   
-  // ✅ FIX: Gunakan nama variabel yang konsisten (plural)
   const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [statistics, setStatistics] = useState<Statistics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Debug theme (opsional)
+  useEffect(() => {
+    console.log('[HomePage] Theme:', theme, 'Resolved:', resolvedTheme);
+  }, [theme, resolvedTheme]);
 
   useEffect(() => {
     fetchAllData();
@@ -126,33 +86,32 @@ export default function HomePage() {
       setIsLoading(true);
       setError(null);
 
-      // Fetch all data in parallel using api helpers
-      const [productsRes, categoriesRes, reviewsRes, statsRes] = await Promise.allSettled([
-        productAPI.getBestSellers(4),
-        categoryAPI.getAll(),
+      // ✅ FIX: Fetch products dengan sort by sold_count DESC (paling laris di atas)
+      const [productsRes, reviewsRes, statsRes] = await Promise.allSettled([
+        // ✅ Tambah limit=4 di query string
+        fetch('/api/products?sort=sold_count&order=desc&limit=5', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+        }).then(res => res.json()),
         reviewAPI.getTopRated(5),
         statisticsAPI.getDashboard(),
       ]);
 
       // Process products
-      if (productsRes.status === 'fulfilled' && productsRes.value.data.success) {
-        setProducts(productsRes.value.data.products || []);
-      } else if (productsRes.status === 'rejected') {
-        console.error('Failed to fetch products:', productsRes.reason);
-      }
-
-      // ✅ FIX: Gunakan 'categories' (plural) sesuai response API
-      if (categoriesRes.status === 'fulfilled' && categoriesRes.value.data.success) {
-        setCategories(categoriesRes.value.data.categories || []);
+      if (productsRes.status === 'fulfilled' && productsRes.value?.success) {
+        // Filter hanya produk ready_stock & pre-order (hapus deleted/sold_out dari homepage)
+        const filtered = (productsRes.value.products || []).filter((p: Product) => 
+          p.status === 'ready_stock' || p.status === 'pre-order'
+        );
+        setProducts(filtered);
       }
 
       // Process reviews
-      if (reviewsRes.status === 'fulfilled' && reviewsRes.value.data.success) {
+      if (reviewsRes.status === 'fulfilled' && reviewsRes.value?.data?.success) {
         setReviews(reviewsRes.value.data.reviews || []);
       }
 
       // Process statistics
-      if (statsRes.status === 'fulfilled' && statsRes.value.data.success) {
+      if (statsRes.status === 'fulfilled' && statsRes.value?.data?.success) {
         setStatistics(statsRes.value.data.data || null);
       }
 
@@ -170,7 +129,8 @@ export default function HomePage() {
     return num.toString();
   };
 
-  // ✅ FIX: Loading state dengan spinner
+  
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -183,7 +143,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="animate-fade-in min-h-screen pb-20">
+    <div className="animate-fade-in min-h-screen pb-20" data-theme={resolvedTheme}>
       <Header />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -213,61 +173,15 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ✅ FIX: Categories Section */}
-        <section className="mb-8">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <TrendingUp className="w-6 h-6 text-primary" />
-            Kategori Produk
-          </h2>
-          <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-2">
-            {(categories.length > 0 ? categories : defaultCategories).map((cat, index) => {
-              // ✅ FIX: Dapatkan icon component dari mapping berdasarkan NAME
-              let IconComponent: any = Sprout;
-              
-              if (cat.icon && categoryIcons[cat.icon]) {
-                // Jika icon dari API adalah nama icon (Sprout, Apple, dll)
-                IconComponent = categoryIcons[cat.icon];
-              } else if (categoryIcons[cat.name]) {
-                // Jika icon berdasarkan nama kategori
-                IconComponent = categoryIcons[cat.name];
-              } else {
-                // Fallback ke default category
-                const defaultCat = defaultCategories.find(c => c.name === cat.name);
-                if (defaultCat) {
-                  IconComponent = defaultCat.icon;
-                }
-              }
-              
-              const colorClass = cat.color || defaultCategories.find(c => c.name === cat.name)?.color || 'bg-green-100';
-              
-              return (
-                <button
-                  key={cat.id || index}
-                  onClick={() => window.location.href = `/katalog?category=${cat.slug || cat.name}`}
-                  className="flex-shrink-0 bg-surface rounded-2xl p-6 text-center min-w-[100px] hover:border-primary hover:-translate-y-1 transition-all duration-300 border-2 border-transparent"
-                >
-                  {/* ✅ FIX: Render sebagai JSX element */}
-                  {IconComponent && typeof IconComponent === 'function' ? (
-                    <IconComponent className={`w-10 h-10 mx-auto mb-2 ${colorClass.replace('bg-', 'text-')}`} />
-                  ) : (
-                    <span className="text-4xl">🌾</span>
-                  )}
-                  <span className="text-sm font-medium text-text-primary">{cat.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Best Sellers */}
+        {/* ✅ Produk Terlaris (diurutkan by sold_count) */}
         <section className="mb-8">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold flex items-center gap-2">
-              <Star className="w-6 h-6 text-orange-500 fill-orange-500" />
-              Produk Terlaris ⭐
+              <Flame className="w-6 h-6 text-orange-500 fill-orange-500" />
+              Produk Paling Laris 🔥
             </h2>
             <button 
-              onClick={() => window.location.href = '/katalog'}
+              onClick={() => window.location.href = '/katalog?sort=sold_count&order=desc'}
               className="text-primary font-semibold text-sm flex items-center gap-1"
             >
               Lihat Semua <ArrowRight className="w-4 h-4" />
@@ -278,16 +192,24 @@ export default function HomePage() {
               {products.map((product) => (
                 <ProductCard 
                   key={product.id} 
-                  product={{
-                    ...product,
+                  product={{ 
+                    ...product, 
                     image: product.image_path,
+                    // ✅ Tambahkan badge "Terlaris" untuk produk dengan sold_count tinggi
+                    badge: product.sold_count >= 50 ? 'Terlaris' : undefined,
                   }} 
                 />
               ))}
             </div>
           ) : (
             <div className="text-center py-10 bg-surface rounded-2xl">
-              <p className="text-text-secondary">Belum ada produk terlaris</p>
+              <p className="text-text-secondary">Belum ada produk tersedia</p>
+              <button 
+                onClick={() => window.location.href = '/katalog'}
+                className="btn-primary mt-4"
+              >
+                Jelajahi Katalog
+              </button>
             </div>
           )}
         </section>
@@ -382,7 +304,6 @@ export default function HomePage() {
       </main>
 
       <MobileNav />
-      <ThemeToggle />
     </div>
   );
 }

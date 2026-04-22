@@ -11,7 +11,7 @@ interface CartItem {
   product: {
     id: number;
     name: string;
-    price: number;
+    price: number;  // ✅ Price ada di sini
     image?: string;
     stock: number;
     min_order: number;
@@ -23,8 +23,9 @@ interface CartItem {
 interface CartContextType {
   items: CartItem[];
   isLoading: boolean;
-  totalItems: number;
-  totalPrice: number;
+  totalItems: number;        // ✅ Jumlah jenis produk
+  totalQuantity: number;     // ✅ Total quantity semua produk
+  totalPrice: number;        // ✅ Total harga
   addToCart: (productId: number, quantity: number) => Promise<void>;
   updateQuantity: (productId: number, quantity: number) => Promise<void>;
   removeFromCart: (productId: number) => Promise<void>;
@@ -104,7 +105,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ productId, quantity }),
+        body: JSON.stringify({ quantity }), // ✅ Hanya kirim quantity, productId dari URL
       });
 
       if (!res.ok) {
@@ -157,19 +158,27 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
-  const totalPrice = items.reduce(
-    (sum, item) => sum + item.product.price * item.quantity,
-    0
-  );
+  // ✅ FIX: Hitung totalItems = jumlah jenis produk
+  const totalItems = items.length;
+  
+  // ✅ FIX: Hitung totalQuantity = jumlah semua quantity
+  const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  
+  // ✅ ✅ FIX: Hitung totalPrice = item.product.price * quantity
+  const totalPrice = items.reduce((sum, item) => {
+    const price = item.product?.price || 0;  // ✅ Akses price dari nested object
+    const qty = item.quantity || 0;
+    return sum + (price * qty);
+  }, 0);
 
   return (
     <CartContext.Provider
       value={{
         items,
         isLoading,
-        totalItems,
-        totalPrice,
+        totalItems,        // ✅ Jumlah jenis produk
+        totalQuantity,     // ✅ Total quantity
+        totalPrice,        // ✅ Total harga
         addToCart,
         updateQuantity,
         removeFromCart,

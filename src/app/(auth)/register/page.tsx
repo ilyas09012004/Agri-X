@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Leaf, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
+import { Leaf, Mail, Lock, User, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -14,6 +14,20 @@ export default function RegisterPage() {
     confirmPassword: '',
     role: 'buyer',
   });
+
+  // ✅ State untuk auto-hide icon
+  const [isFocused, setIsFocused] = useState<{
+    name: boolean;
+    email: boolean;
+    password: boolean;
+    confirmPassword: boolean;
+  }>({ 
+    name: false, 
+    email: false, 
+    password: false, 
+    confirmPassword: false 
+  });
+
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -22,8 +36,15 @@ export default function RegisterPage() {
     e.preventDefault();
     setError('');
 
+    // Validasi password match
     if (formData.password !== formData.confirmPassword) {
       setError('Password tidak cocok');
+      return;
+    }
+
+    // Validasi panjang password
+    if (formData.password.length < 6) {
+      setError('Password minimal 6 karakter');
       return;
     }
 
@@ -47,6 +68,7 @@ export default function RegisterPage() {
         throw new Error(data.error || 'Register gagal');
       }
 
+      // ✅ Tampilkan success message sebelum redirect
       alert('✅ Registrasi berhasil! Silakan login.');
       router.push('/login');
     } catch (err: any) {
@@ -58,11 +80,12 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 to-secondary/10 px-4 py-8">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 to-secondary/10  py-8">
+      {/* Main Container - Responsive Width */}
+      <div className="w-full max-w-500">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
             <Leaf className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-text-primary">Agri X</h1>
@@ -70,45 +93,68 @@ export default function RegisterPage() {
         </div>
 
         {/* Register Form */}
-        <div className="bg-surface rounded-3xl p-8 shadow-lg">
+        <div className="bg-surface rounded-3xl p-6 sm:p-8 shadow-xl border border-border/50">
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Name */}
+            
+            {/* Name Input */}
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-2">
                 Nama Lengkap
               </label>
               <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
+                {/* ✅ Icon dengan animasi auto-hide */}
+                <User 
+                  className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary transition-all duration-200 ${
+                    formData.name || isFocused.name 
+                      ? 'opacity-0 pointer-events-none -translate-x-2' 
+                      : 'opacity-100 translate-x-0'
+                  }`} 
+                />
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Nama lengkap"
+                  onFocus={() => setIsFocused(prev => ({ ...prev, name: true }))}
+                  onBlur={() => setIsFocused(prev => ({ ...prev, name: false }))}
+                  placeholder="     Nama lengkap"
                   required
-                  className="input pl-12"
+                  // ✅ Padding animasi: pl-12 (icon) → pl-4 (no icon)
+                  className={`w-full input py-3 rounded-xl border border-border focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200 ${
+                    formData.name || isFocused.name ? 'pl-4 pr-4' : 'pl-12 pr-4'
+                  }`}
                 />
               </div>
             </div>
 
-            {/* Email */}
+            {/* Email Input */}
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-2">
                 Email
               </label>
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
+                <Mail 
+                  className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary transition-all duration-200 ${
+                    formData.email || isFocused.email 
+                      ? 'opacity-0 pointer-events-none -translate-x-2' 
+                      : 'opacity-100 translate-x-0'
+                  }`} 
+                />
                 <input
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="nama@email.com"
+                  onFocus={() => setIsFocused(prev => ({ ...prev, email: true }))}
+                  onBlur={() => setIsFocused(prev => ({ ...prev, email: false }))}
+                  placeholder="      nama@email.com"
                   required
-                  className="input pl-12"
+                  className={`w-full input py-3 rounded-xl border border-border focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200 ${
+                    formData.email || isFocused.email ? 'pl-4 pr-4' : 'pl-12 pr-4'
+                  }`}
                 />
               </div>
             </div>
 
-            {/* Role */}
+            {/* Role Select */}
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-2">
                 Saya adalah
@@ -116,61 +162,107 @@ export default function RegisterPage() {
               <select
                 value={formData.role}
                 onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                className="input"
+                className="w-full input py-3 rounded-xl border border-border focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all bg-background"
               >
-                <option value="buyer">Pembeli</option>
-                <option value="seller">Penjual/Petani</option>
+                <option value="">Pilih peran...</option>
+                <option value="buyer">🛒 Pembeli</option>
+                <option value="seller">🌾 Penjual/Petani</option>
               </select>
             </div>
 
-            {/* Password */}
+            {/* Password Input */}
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-2">
                 Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
+                <Lock 
+                  className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary transition-all duration-200 ${
+                    formData.password || isFocused.password 
+                      ? 'opacity-0 pointer-events-none -translate-x-2' 
+                      : 'opacity-100 translate-x-0'
+                  }`} 
+                />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="••••••••"
+                  onFocus={() => setIsFocused(prev => ({ ...prev, password: true }))}
+                  onBlur={() => setIsFocused(prev => ({ ...prev, password: false }))}
+                  placeholder="      ••••••••"
                   required
                   minLength={6}
-                  className="input pl-12 pr-12"
+                  // ✅ Padding: pl-12 → pl-4, pr-12 untuk tombol eye
+                  className={`w-full input py-3 rounded-xl border border-border focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200 ${
+                    formData.password || isFocused.password ? 'pl-4 pr-12' : 'pl-12 pr-12'
+                  }`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary transition-colors p-1"
+                  aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
+              {/* Password hint */}
+              <p className="text-xs text-text-secondary mt-1 ml-1">
+                Minimal 6 karakter
+              </p>
             </div>
 
-            {/* Confirm Password */}
+            {/* Confirm Password Input */}
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-2">
                 Konfirmasi Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
+                <Lock 
+                  className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary transition-all duration-200 ${
+                    formData.confirmPassword || isFocused.confirmPassword 
+                      ? 'opacity-0 pointer-events-none -translate-x-2' 
+                      : 'opacity-100 translate-x-0'
+                  }`} 
+                />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                  placeholder="••••••••"
+                  onFocus={() => setIsFocused(prev => ({ ...prev, confirmPassword: true }))}
+                  onBlur={() => setIsFocused(prev => ({ ...prev, confirmPassword: false }))}
+                  placeholder="      ••••••••"
                   required
-                  className="input pl-12"
+                  className={`w-full input py-3 rounded-xl border border-border focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200 ${
+                    formData.confirmPassword || isFocused.confirmPassword ? 'pl-4 pr-4' : 'pl-12 pr-4'
+                  }`}
                 />
               </div>
+              {/* ✅ Password match validation feedback */}
+              {formData.confirmPassword && formData.password && (
+                <p className={`text-xs mt-1 ml-1 flex items-center gap-1 ${
+                  formData.password === formData.confirmPassword 
+                    ? 'text-green-500' 
+                    : 'text-red-500'
+                }`}>
+                  {formData.password === formData.confirmPassword ? (
+                    <>
+                      <CheckCircle className="w-3 h-3" /> Password cocok
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-3 h-3" /> Password tidak cocok
+                    </>
+                  )}
+                </p>
+              )}
             </div>
 
             {/* Error Message */}
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm">
-                {error}
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-red-600 dark:text-red-200 text-sm flex items-start gap-2">
+                <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{error}</span>
               </div>
             )}
 
@@ -178,15 +270,18 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="btn-primary w-full py-4 text-lg disabled:opacity-50"
+              className="btn-primary w-full py-4 text-lg rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:shadow-lg"
             >
               {isLoading ? (
-                <div className="flex items-center justify-center gap-2">
+                <>
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   <span>Memuat...</span>
-                </div>
+                </>
               ) : (
-                'Daftar'
+                <>
+                  <User className="w-5 h-5" />
+                  Daftar Sekarang
+                </>
               )}
             </button>
           </form>
@@ -197,13 +292,20 @@ export default function RegisterPage() {
               Sudah punya akun?{' '}
               <button
                 onClick={() => router.push('/login')}
-                className="text-primary font-semibold hover:underline"
+                className="text-primary font-semibold hover:underline transition-colors"
               >
                 Masuk sekarang
               </button>
             </p>
           </div>
         </div>
+
+        {/* Footer */}
+        <p className="text-center text-xs text-text-secondary mt-6">
+          Dengan mendaftar, Anda menyetujui{' '}
+          <button className="text-primary hover:underline">Syarat & Ketentuan</button>
+          {' '}Agri X
+        </p>
       </div>
     </div>
   );

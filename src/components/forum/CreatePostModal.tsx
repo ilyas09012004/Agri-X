@@ -1,354 +1,535 @@
+// src/components/forum/CreatePostModal.tsx
 'use client';
 
-import { useState } from 'react';
-import { X, Plus, Image as ImageIcon, Loader2, Trash2 } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { Image, X, Plus, Loader2, Upload, Search, ExternalLink, Check } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 interface CreatePostModalProps {
   onClose: () => void;
+  categories: Array<{ id: number; name: string; slug: string; icon: string }>;
   onSuccess: () => void;
-  categories: Array<{ id: number; name: string; slug: string }>;
 }
 
-// ✅ Placeholder untuk preview error
-const PREVIEW_PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%23f5f9f4" width="200" height="200"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="12" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EGambar error%3C/text%3E%3C/svg%3E';
+interface PostImage {
+  url: string;
+  alt: string;
+  source: 'google' | 'unsplash' | 'pexels' | 'pixabay' | 'upload' | 'local';
+  originalUrl?: string; // ✅ Link ke sumber asli (untuk Google Images)
+  fileName?: string;    // ✅ Nama file untuk upload lokal
+}
 
-export function CreatePostModal({ onClose, onSuccess, categories }: CreatePostModalProps) {
+// ✅ Katalog gambar gratis (bisa diganti dengan API call ke Unsplash/Pexels)
+const FREE_IMAGE_CATALOG = [
+  {
+    url: 'https://images.unsplash.com/photo-1592841200221-a6898f307baa?w=800',
+    alt: 'Tanaman cabai',
+    source: 'unsplash' as const,
+    originalUrl: 'https://unsplash.com/photos/cabai-plant',
+  },
+  {
+    url: 'https://images.pexels.com/photos/1579739/pexels-photo-1579739.jpeg?w=800',
+    alt: 'Sawah padi',
+    source: 'pexels' as const,
+    originalUrl: 'https://pexels.com/photo/rice-field',
+  },
+  {
+    url: 'https://cdn.pixabay.com/photo/2017/10/09/15/30/tomato-2833542_960_720.jpg',
+    alt: 'Tomat segar',
+    source: 'pixabay' as const,
+    originalUrl: 'https://pixabay.com/photos/tomato',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1548550023-2bdb3c5beed7?w=800',
+    alt: 'Ayam kampung',
+    source: 'unsplash' as const,
+    originalUrl: 'https://unsplash.com/photos/chicken',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1533230739623-a5e2a54e8e8f?w=800',
+    alt: 'Petani bekerja',
+    source: 'unsplash' as const,
+    originalUrl: 'https://unsplash.com/photos/farmer',
+  },
+  {
+    url: 'https://images.pexels.com/photos/616350/pexels-photo-616350.jpeg?w=800',
+    alt: 'Anak ayam',
+    source: 'pexels' as const,
+    originalUrl: 'https://pexels.com/photo/chick',
+  },
+];
+
+export function CreatePostModal({ onClose, categories, onSuccess }: CreatePostModalProps) {
+  const router = useRouter();
+  const { isAuthenticated, user } = useAuth();
+  
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [images, setImages] = useState<Array<{ url: string; file: File }>>([]);
-  const [isUploading, setIsUploading] = useState(false);
+  const [images, setImages] = useState<PostImage[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [uploadProgress, setUploadProgress] = useState(0);
+  
+  // ✅ State untuk Google Images catalog modal
+  const [showImageCatalog, setShowImageCatalog] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  
+  // ✅ Ref untuk file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ✅ Redirect jika tidak login
+  if (!isAuthenticated) {
+    router.push('/login');
+    return null;
+  }
+
+  // ✅ Handle file upload dari lokal
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-
-    const remainingSlots = 5 - images.length;
-    const filesToUpload = Array.from(files).slice(0, remainingSlots);
-
-    if (files.length > remainingSlots) {
-      alert(`Maksimal ${5} gambar. ${files.length - remainingSlots} gambar tidak akan diupload.`);
+    
+    if (images.length + files.length > 5) {
+      alert('Maksimal 5 gambar per post');
+      return;
     }
 
-    setIsUploading(true);
-    setError('');
-    setUploadProgress(0);
-
-    try {
-      const token = localStorage.getItem('accessToken');
-      
-      for (let i = 0; i < filesToUpload.length; i++) {
-        const file = filesToUpload[i];
-        
-        // Validate file
-        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-        if (!allowedTypes.includes(file.type)) {
-          throw new Error(`Format ${file.name} tidak didukung`);
-        }
-        
-        const maxSize = 5 * 1024 * 1024;
-        if (file.size > maxSize) {
-          throw new Error(`${file.name} melebihi 5MB`);
-        }
-
-        // Create preview URL
-        const previewUrl = URL.createObjectURL(file);
-        
-        // Add to state immediately for preview
-        setImages(prev => [...prev, { url: previewUrl, file }]);
-        
-        // Upload to server (optional - can upload on submit instead)
-        // For now, we'll upload on submit to reduce API calls
-        
-        // Update progress
-        setUploadProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
+    Array.from(files).forEach((file) => {
+      // Validasi tipe file
+      if (!file.type.startsWith('image/')) {
+        alert('Hanya file gambar yang diperbolehkan');
+        return;
       }
       
-    } catch (err: any) {
-      setError(err.message || 'Gagal upload gambar');
-    } finally {
-      setIsUploading(false);
-      // Reset input
-      e.target.value = '';
+      // Validasi ukuran (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Ukuran gambar maksimal 5MB');
+        return;
+      }
+
+      // Preview dengan FileReader (untuk demo)
+      // ✅ Di production, upload ke server dan dapatkan URL
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        setImages(prev => [...prev, {
+          url: result,  // Base64 untuk preview
+          alt: file.name.replace(/\.[^/.]+$/, ''),
+          source: 'local',
+          fileName: file.name,
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
-  const removeImage = (index: number) => {
-    const image = images[index];
-    // Revoke object URL to prevent memory leak
-    if (image.url.startsWith('blob:')) {
-      URL.revokeObjectURL(image.url);
+  // ✅ Handle tambah image URL manual
+  const handleAddImageUrl = () => {
+    if (images.length >= 5) {
+      alert('Maksimal 5 gambar per post');
+      return;
     }
-    setImages(prev => prev.filter((_, i) => i !== index));
+    setImages([...images, { url: '', alt: '', source: 'google' }]);
   };
 
+  // ✅ Handle change image field
+  const handleImageChange = (index: number, field: keyof PostImage, value: string) => {
+    const newImages = [...images];
+    newImages[index] = { ...newImages[index], [field]: value };
+    setImages(newImages);
+  };
+
+  // ✅ Handle remove image
+  const handleRemoveImage = (index: number) => {
+    setImages(images.filter((_, i) => i !== index));
+  };
+
+  // ✅ Handle select image from catalog
+  const handleSelectCatalogImage = (catalogImage: typeof FREE_IMAGE_CATALOG[0]) => {
+    if (images.length >= 5) {
+      alert('Maksimal 5 gambar per post');
+      return;
+    }
+    setImages(prev => [...prev, {
+      url: catalogImage.url,
+      alt: catalogImage.alt,
+      source: catalogImage.source,
+      originalUrl: catalogImage.originalUrl, // ✅ Simpan link sumber
+    }]);
+    setShowImageCatalog(false);
+  };
+
+  // ✅ Filter catalog berdasarkan search
+  const filteredCatalog = FREE_IMAGE_CATALOG.filter(img =>
+    img.alt.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+    img.source.toLowerCase().includes(catalogSearch.toLowerCase())
+  );
+
+  // ✅ Handle submit form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    
+    // Validasi required fields
+    if (!title.trim() || !content.trim() || !categoryId) {
+      setError('Judul, konten, dan kategori wajib diisi');
+      return;
+    }
 
-    // Validasi
-    if (title.length < 10) {
-      setError('Judul minimal 10 karakter');
-      return;
-    }
-    if (content.length < 20) {
-      setError('Isi diskusi minimal 20 karakter');
-      return;
-    }
-    if (!categoryId) {
-      setError('Pilih kategori');
+    // Validasi gambar
+    const validImages = images.filter(img => img.url.trim());
+    if (validImages.length > 5) {
+      setError('Maksimal 5 gambar per post');
       return;
     }
 
     setIsSubmitting(true);
-
     try {
       const token = localStorage.getItem('accessToken');
       
-      // Upload images first if any
-      let imageUrls: string[] = [];
+      // ✅ Prepare payload untuk API
+      const payload = {
+        title: title.trim(),
+        content: content.trim(),
+        categoryId: parseInt(categoryId),
+        images: validImages.map(img => ({
+          url: img.url,
+          alt: img.alt,
+          source: img.source,
+          originalUrl: img.originalUrl, // ✅ Kirim link sumber ke backend
+        })),
+      };
       
-      if (images.length > 0) {
-        const uploadPromises = images.map(async ({ file }) => {
-          const formData = new FormData();
-          formData.append('image', file);
-
-          const res = await fetch('/api/forum/upload', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
-            body: formData,
-          });
-
-          if (!res.ok) {
-            const error = await res.json();
-            throw new Error(error.error || 'Gagal upload gambar');
-          }
-
-          const data = await res.json();
-          return data.imageUrl;
-        });
-
-        imageUrls = await Promise.all(uploadPromises);
-      }
-
-      // Create post
       const res = await fetch('/api/forum/posts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          title,
-          content,
-          categoryId: parseInt(categoryId),
-          images: imageUrls,
-        }),
+        body: JSON.stringify(payload),
       });
 
+      const data = await res.json();
+      
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Gagal membuat diskusi');
+        throw new Error(data.error || 'Gagal membuat diskusi');
       }
-
-      // Cleanup object URLs
-      images.forEach(({ url }) => {
-        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
-      });
 
       onSuccess();
       
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Terjadi kesalahan');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Cleanup on unmount
-  const handleClose = () => {
-    images.forEach(({ url }) => {
-      if (url.startsWith('blob:')) URL.revokeObjectURL(url);
-    });
-    onClose();
-  };
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end md:items-center justify-center z-50">
-      <div className="bg-background rounded-t-3xl md:rounded-3xl w-full max-w-lg p-6 animate-slide-up max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold text-text-primary">Buat Diskusi Baru</h2>
-          <button
-            onClick={handleClose}
-            className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-surface transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+    <>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        
+        {/* Error Message */}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm animate-fade-in">
+            {error}
+          </div>
+        )}
+
+        {/* Title Input */}
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-2">
+            Judul Diskusi <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Contoh: Tips menanam cabai di musim hujan"
+            className="input w-full text-base focus:ring-2 focus:ring-primary/20"
+            required
+            maxLength={255}
+          />
+          <p className="text-xs text-text-secondary mt-1 text-right">
+            {title.length}/255
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="p-3 bg-red-100 text-red-700 rounded-xl text-sm flex items-center gap-2">
-              <span>⚠️</span>
-              {error}
-            </div>
-          )}
+        {/* Category Select */}
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-2">
+            Kategori <span className="text-red-500">*</span>
+          </label>
+          <select
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+            className="input w-full text-base focus:ring-2 focus:ring-primary/20"
+            required
+          >
+            <option value="">Pilih Kategori</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.icon} {cat.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-          {/* Judul */}
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">Judul Topik *</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Masukkan judul diskusi..."
-              className="input"
-              maxLength={255}
-              required
-            />
-            <p className="text-xs text-text-secondary mt-1">
-              {title.length}/255 karakter (min 10)
-            </p>
-          </div>
+        {/* Content Textarea */}
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-2">
+            Isi Diskusi <span className="text-red-500">*</span>
+          </label>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Tulis pertanyaan atau pendapat Anda..."
+            className="input w-full min-h-[150px] text-base resize-y focus:ring-2 focus:ring-primary/20"
+            required
+          />
+        </div>
 
-          {/* Kategori */}
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">Kategori *</label>
-            <select
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              className="input"
-              required
-            >
-              <option value="">Pilih Kategori</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Isi */}
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">Isi Diskusi *</label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Tuliskan isi diskusi Anda..."
-              rows={5}
-              className="input"
-              maxLength={5000}
-              required
-            />
-            <p className="text-xs text-text-secondary mt-1">
-              {content.length}/5000 karakter (min 20)
-            </p>
-          </div>
-
-          {/* ✅ Upload Gambar */}
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">
-              Upload Gambar (Opsional)
+        {/* Images Section */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-text-secondary">
+              Gambar (Opsional, Maksimal 5)
             </label>
-            
-            {/* Preview Grid */}
-            {images.length > 0 && (
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {images.map((img, index) => (
-                  <div key={index} className="relative group">
-                    <img
-                      src={img.url}
-                      alt={`Preview ${index + 1}`}
-                      className="w-full h-20 object-cover rounded-lg border border-border"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = PREVIEW_PLACEHOLDER;
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(index)}
-                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow-lg hover:bg-red-600 transition-colors"
-                      aria-label="Hapus gambar"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                    {/* Loading overlay */}
-                    {isUploading && index === images.length - 1 && (
-                      <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
-                        <Loader2 className="w-4 h-4 text-white animate-spin" />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Upload Button */}
-            <label className={`flex items-center justify-center gap-2 p-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
-              isUploading 
-                ? 'border-primary/50 bg-primary/5' 
-                : 'border-border hover:border-primary hover:bg-primary/5'
-            } ${images.length >= 5 ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              {isUploading ? (
-                <>
-                  <Loader2 className="w-5 h-5 text-primary animate-spin" />
-                  <span className="text-sm text-primary">Mengupload... {uploadProgress}%</span>
-                </>
-              ) : images.length >= 5 ? (
-                <span className="text-sm text-text-secondary">Maksimal 5 gambar tercapai</span>
-              ) : (
-                <>
-                  <ImageIcon className="w-5 h-5 text-text-secondary" />
-                  <span className="text-sm text-text-secondary">Tambah Gambar (max 5MB)</span>
-                </>
+            <div className="flex gap-2">
+              {/* Button Upload File */}
+              {images.length < 5 && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-sm text-primary hover:underline flex items-center gap-1"
+                >
+                  <Upload className="w-4 h-4" />
+                  Upload
+                </button>
               )}
+              
+              {/* Hidden File Input */}
               <input
+                ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                onChange={handleImageUpload}
-                className="hidden"
                 multiple
-                disabled={isUploading || images.length >= 5}
+                onChange={handleFileUpload}
+                className="hidden"
               />
-            </label>
-            
-            <p className="text-xs text-text-secondary mt-2">
-              Format: JPG, PNG, WebP • Max 5 gambar • Max 5MB per file
-            </p>
+              
+              {/* Button Catalog */}
+              {images.length < 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowImageCatalog(true)}
+                  className="text-sm text-primary hover:underline flex items-center gap-1"
+                >
+                  <Search className="w-4 h-4" />
+                  Katalog
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="btn-outline flex-1"
-              disabled={isSubmitting}
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting || isUploading}
-              className="btn-primary flex-1 disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Memposting...</span>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center gap-2">
-                  <Plus className="w-5 h-5" />
-                  <span>Posting Diskusi</span>
+          {/* Image Previews & Inputs */}
+          {images.map((img, index) => (
+            <div key={index} className="p-4 border border-border rounded-xl space-y-3 bg-surface/50">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium flex items-center gap-2">
+                  Gambar #{index + 1}
+                  {img.source === 'local' && (
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                      Lokal
+                    </span>
+                  )}
+                  {img.source !== 'local' && img.originalUrl && (
+                    <a
+                      href={img.originalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Sumber
+                    </a>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveImage(index)}
+                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              {/* Image Preview */}
+              {img.url && (
+                <div className="relative group">
+                  <img 
+                    src={img.url} 
+                    alt={img.alt || 'Preview'}
+                    className="w-full h-40 object-cover rounded-lg border border-border"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"%3E%3Crect fill="%23f5f9f4" width="400" height="300"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3E🖼️ Gambar tidak tersedia%3C/text%3E%3C/svg%3E';
+                      (e.target as HTMLImageElement).classList.add('opacity-50');
+                    }}
+                    crossOrigin="anonymous"
+                    referrerPolicy="no-referrer"
+                  />
+                  {/* Source Badge */}
+                  <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 text-white text-xs rounded-full flex items-center gap-1">
+                    {img.source === 'unsplash' && '📷 Unsplash'}
+                    {img.source === 'pexels' && '📷 Pexels'}
+                    {img.source === 'pixabay' && '📷 Pixabay'}
+                    {img.source === 'google' && '🔍 Google'}
+                    {img.source === 'local' && '💾 Lokal'}
+                  </div>
                 </div>
               )}
-            </button>
+              
+              {/* Image URL Input (for external images) */}
+              {img.source !== 'local' && (
+                <input
+                  type="url"
+                  value={img.url}
+                  onChange={(e) => handleImageChange(index, 'url', e.target.value)}
+                  placeholder="https://images.unsplash.com/..."
+                  className="input w-full text-sm"
+                />
+              )}
+              
+              {/* Alt Text Input */}
+              <input
+                type="text"
+                value={img.alt}
+                onChange={(e) => handleImageChange(index, 'alt', e.target.value)}
+                placeholder="Deskripsi gambar (untuk aksesibilitas)"
+                className="input w-full text-sm"
+              />
+              
+              {/* Source Attribution (for external images) */}
+              {img.source !== 'local' && img.originalUrl && (
+                <p className="text-xs text-text-secondary">
+                  Sumber: <a href={img.originalUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{img.originalUrl}</a>
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Submit Button */}
+        <div className="pt-4">
+          <button
+            type="submit"
+            disabled={isSubmitting || !title.trim() || !content.trim() || !categoryId}
+            className="btn-primary w-full py-4 text-base font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Memposting...</span>
+              </>
+            ) : (
+              'Posting Diskusi'
+            )}
+          </button>
+        </div>
+      </form>
+
+      {/* ✅ GOOGLE IMAGES CATALOG MODAL */}
+      {showImageCatalog && (
+        <div 
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowImageCatalog(false);
+          }}
+        >
+          <div 
+            className="relative w-full max-w-4xl bg-surface rounded-2xl shadow-2xl animate-scale-in overflow-hidden flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Catalog Header */}
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <h3 className="text-lg font-bold text-text-primary">Pilih Gambar Gratis</h3>
+              <button
+                onClick={() => setShowImageCatalog(false)}
+                className="p-2 hover:bg-primary/10 rounded-lg transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            {/* Search Bar */}
+            <div className="p-4 border-b border-border">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
+                <input
+                  type="text"
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  placeholder="Cari gambar (cabai, padi, tomat...)"
+                  className="input pl-12 w-full"
+                />
+              </div>
+              <p className="text-xs text-text-secondary mt-2">
+                💡 Gambar dari Unsplash, Pexels, Pixabay - Gratis untuk penggunaan komersial
+              </p>
+            </div>
+            
+            {/* Image Grid */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                {filteredCatalog.map((catalogImg, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => handleSelectCatalogImage(catalogImg)}
+                    className="relative group aspect-square rounded-xl overflow-hidden border-2 border-transparent hover:border-primary transition-all bg-surface"
+                  >
+                    <img
+                      src={catalogImg.url}
+                      alt={catalogImg.alt}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      loading="lazy"
+                    />
+                    {/* Hover Overlay */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity text-white text-center">
+                        <Check className="w-8 h-8 mx-auto mb-1" />
+                        <span className="text-sm font-medium">Pilih</span>
+                      </div>
+                    </div>
+                    {/* Source Badge */}
+                    <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded-full">
+                      {catalogImg.source}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              
+              {filteredCatalog.length === 0 && (
+                <div className="text-center py-12 text-text-secondary">
+                  <Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>Tidak ada gambar yang cocok</p>
+                </div>
+              )}
+            </div>
+            
+            {/* Catalog Footer */}
+            <div className="p-4 border-t border-border bg-surface/95">
+              <p className="text-xs text-text-secondary text-center">
+                📸 Semua gambar berlisensi gratis. Klik "Sumber" di post untuk melihat kredit fotografer.
+              </p>
+            </div>
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 }

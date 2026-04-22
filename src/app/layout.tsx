@@ -1,4 +1,3 @@
-// src/app/layout.tsx
 import type { Metadata } from 'next';
 import { ThemeProvider } from 'next-themes';
 import { AuthProvider } from '@/context/AuthContext';
@@ -19,6 +18,21 @@ export const metadata: Metadata = {
   },
 };
 
+// ✅ FIX: Inline script untuk mencegah FOUC (Flash of Unstyled Content)
+// Script ini dijalankan SEBELUM React hydrate untuk apply theme dari localStorage
+const themeScript = `
+  (function() {
+    try {
+      const theme = localStorage.getItem('agri-x-theme');
+      if (theme === 'dark' || theme === 'light') {
+        document.documentElement.setAttribute('data-theme', theme);
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+  })();
+`;
+
 export default function RootLayout({
   children,
 }: {
@@ -26,12 +40,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="id" suppressHydrationWarning>
+      <head>
+        {/* ✅ FIX: Inline script untuk apply theme sebelum hydrate */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="antialiased min-h-screen">
         <ThemeProvider
           attribute="data-theme"
           defaultTheme="light"
           enableSystem={false}
           storageKey="agri-x-theme"
+          // ✅ FIX: Tambahkan nonce jika menggunakan CSP (opsional)
+          // nonce={process.env.NEXT_SCRIPT_NONCE}
         >
           <AuthProvider>
             <CartProvider>

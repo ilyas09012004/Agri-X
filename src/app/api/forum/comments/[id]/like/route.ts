@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { verifyAccessToken } from '@/utils/jwt.util';
-import { handleAPIError } from '@/lib/middleware';
 
 type Params = {
   params: Promise<{ id: string }>;
@@ -9,61 +8,58 @@ type Params = {
 
 export async function POST(req: NextRequest, { params }: Params) {
   try {
+    const resolvedParams = await params;
+    const commentId = resolvedParams.id;
+
+    if (!commentId || isNaN(Number(commentId))) {
+      return NextResponse.json({ success: false, error: 'Invalid Comment ID' }, { status: 400 });
+    }
+
+    // Verifikasi Auth
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
+    if (!authHeader) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = verifyAccessToken(token);
-    if (!decoded) {
-      throw new Error('Invalid token');
+    const decoded: any = verifyAccessToken(token);
+    if (!decoded || !decoded.sub) {
+       return NextResponse.json({ success: false, error: 'Invalid Token' }, { status: 401 });
     }
 
-    const userId = decoded.sub;
-    const { id } = await params;
+    // Cek body untuk action (like/unlike)
+    const body = await req.json();
+    const action = body.action || 'like'; // default 'like'
 
-    // Check if already liked
-    const [existingLike] = await pool.execute(
-      'SELECT * FROM forum_likes WHERE user_id = ? AND comment_id = ?',
-      [userId, id]
+    let sql = '';
+    if (action === 'unlike') {
+      // Pastikan tidak minus
+      sql = `UPDATE forum_comments SET likes = GREATEST(likes - 1, 0) WHERE id = ?`;
+    } else {
+      sql = `UPDATE forum_comments SET likes = likes + 1 WHERE id = ?`;
+    }
+
+    await pool.execute(sql, [commentId]);
+
+    // Ambil data terbaru
+    const [rows]: any = await pool.execute(
+      `SELECT likes FROM forum_comments WHERE id = ?`,
+      [commentId]
     );
 
-    if ((existingLike as any[]).length > 0) {
-      // Unlike
-      await pool.execute(
-        'DELETE FROM forum_likes WHERE user_id = ? AND comment_id = ?',
-        [userId, id]
-      );
-      await pool.execute(
-        'UPDATE forum_comments SET likes = likes - 1 WHERE id = ?',
-        [id]
-      );
+    const newLikeCount = rows[0]?.likes || 0;
 
-      return NextResponse.json({
-        success: true,
-        liked: false,
-        message: 'Like dihapus',
-      });
-    } else {
-      // Like
-      await pool.execute(
-        'INSERT INTO forum_likes (user_id, comment_id) VALUES (?, ?)',
-        [userId, id]
-      );
-      await pool.execute(
-        'UPDATE forum_comments SET likes = likes + 1 WHERE id = ?',
-        [id]
-      );
+    return NextResponse.json({
+      success: true,
+      like_count: newLikeCount,
+      message: action === 'unlike' ? 'Unliked' : 'Liked'
+    });
 
-      return NextResponse.json({
-        success: true,
-        liked: true,
-        message: 'Komentar disukai',
-      });
-    }
   } catch (error: any) {
-    console.error('Error liking comment:', error);
-    return handleAPIError(error, 'POST /api/forum/comments/[id]/like');
+    console.error('Like comment error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || 'Internal Server Error' 
+    }, { status: 500 });
   }
 }

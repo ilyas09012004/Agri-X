@@ -259,7 +259,7 @@ h1, h2, h3, h4, h5, h6 {
 .card {
   background-color: var(--color-surface);
   border-radius: var(--radius-xl);
-  padding: var(--spacing-lg);
+  padding: var(--spacing-md);
   border: 1px solid var(--color-border-light);
   box-shadow: var(--shadow-sm);
   transition: all 0.3s ease;

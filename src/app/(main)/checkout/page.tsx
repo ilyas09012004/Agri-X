@@ -1,3 +1,4 @@
+// src/app/(main)/checkout/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -7,6 +8,7 @@ import {
   Smartphone, QrCode, Wallet, Plus, Loader2, CheckCircle,
   AlertCircle, Edit2, Trash2, Check, X
 } from 'lucide-react';
+import PaymentModal from '@/components/payment/PaymentModal';
 
 // Fungsi bantu untuk membaca cookie
 const getCookie = (name: string): string | null => {
@@ -108,48 +110,65 @@ const paymentMethods = [
 
 export default function CheckoutPage() {
   const router = useRouter();
+  
+  // Cart & Pricing State
   const [items, setItems] = useState<any[]>([]);
   const [totalWeight, setTotalWeight] = useState(0);
   const [totalPrice, setTotalPrice] = useState(0);
   const [shippingCost, setShippingCost] = useState(0);
   const [paymentFee, setPaymentFee] = useState(0);
   const [grandTotal, setGrandTotal] = useState(0);
+  
+  // Address State
   const [addresses, setAddresses] = useState<any[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null);
   const [selectedAddressData, setSelectedAddressData] = useState<any>(null);
   const [originVillageCode, setOriginVillageCode] = useState('');
+  
+  // Shipping State
   const [couriers, setCouriers] = useState<any[]>([]);
   const [selectedCourier, setSelectedCourier] = useState('');
+  
+  // Payment State
   const [selectedPayment, setSelectedPayment] = useState('');
+  
+  // Loading & UI State
   const [loading, setLoading] = useState(true);
   const [estimating, setEstimating] = useState(false);
+  const [autoEstimating, setAutoEstimating] = useState(false);
+  const [hasEstimated, setHasEstimated] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  
+  // ✅ Payment Modal State
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [snapToken, setSnapToken] = useState('');
+  const [currentOrderId, setCurrentOrderId] = useState('');
 
-  // Location data for parsing codes to names
+  // Location State
   const [provinces, setProvinces] = useState<any[]>([]);
   const [regencies, setRegencies] = useState<any[]>([]);
   const [districts, setDistricts] = useState<any[]>([]);
   const [villages, setVillages] = useState<any[]>([]);
   const [parsedLocations, setParsedLocations] = useState<Map<string, string>>(new Map());
 
-  // Address form modal state - ✅ Tambah recipientName & recipientPhone
+  // Address Form State
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
   const [addressForm, setAddressForm] = useState({
     detail: '',
-    province: '',      // ✅ CODE untuk DB & API
-    city: '',        // ✅ CODE untuk DB & API
-    district: '',    // ✅ CODE untuk DB & API
-    villageCode: '',   // ✅ CODE 10 digit untuk ongkir
+    province: '',
+    city: '',
+    district: '',
+    villageCode: '',
     zipCode: '',
-    recipientName: '', // ✅ Baru: Nama penerima (wajib)
-    recipientPhone: '',// ✅ Baru: No HP penerima (wajib)
+    recipientName: '',
+    recipientPhone: '',
   });
   const [loadingAddAddress, setLoadingAddAddress] = useState(false);
 
-  // Dropdown states for form (stores CODES)
+  // Dropdown States
   const [selectedProvince, setSelectedProvince] = useState('');
   const [selectedRegency, setSelectedRegency] = useState('');
   const [selectedDistrict, setSelectedDistrict] = useState('');
@@ -168,17 +187,14 @@ export default function CheckoutPage() {
         throw new Error('Sesi tidak ditemukan. Silakan login kembali.');
       }
 
-      // Fetch all locations for parsing
       await loadAllLocations(token);
 
-      // Fetch cart
       const cartRes = await fetch('/api/cart', {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
       if (!cartRes.ok) {
-        const errorText = await cartRes.text();
         throw new Error(`API Cart Error: ${cartRes.status}`);
       }
 
@@ -202,7 +218,6 @@ export default function CheckoutPage() {
         setTotalPrice(0);
       }
 
-      // Fetch addresses
       await fetchAddresses();
 
     } catch (err: any) {
@@ -216,7 +231,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // Load all locations for parsing codes to names
   const loadAllLocations = async (token: string) => {
     try {
       const provRes = await fetch('/api/locations/provinces', {
@@ -224,7 +238,6 @@ export default function CheckoutPage() {
       });
       const provData = await provRes.json();
       if (provData.success) {
-        // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
         const formattedProvinces = (provData.data || []).map((p: any) => ({
           code: p.code || p.id,
           name: p.name,
@@ -239,7 +252,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // Fetch addresses
   const fetchAddresses = async () => {
     try {
       const token = getCookie('accessToken');
@@ -258,7 +270,6 @@ export default function CheckoutPage() {
           if (addrList.length > 0) {
             setSelectedAddressId(addrList[0].id);
             setSelectedAddressData(addrList[0]);
-            // Load location names for this address
             await loadAddressLocationNames(addrList[0], token);
           }
         }
@@ -268,19 +279,16 @@ export default function CheckoutPage() {
     }
   };
 
-  // Load location names for specific address
   const loadAddressLocationNames = async (address: any, token: string) => {
     try {
       const locationMap = new Map<string, string>(parsedLocations);
       
-      // Load regencies for province
       if (address.province) {
         const regRes = await fetch(`/api/locations/regencies/${address.province}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const regData = await regRes.json();
         if (regData.success) {
-          // ✅ Format: pastikan field 'code' ada
           const formattedRegencies = (regData.data || []).map((r: any) => ({
             code: r.code || r.id,
             name: r.name,
@@ -290,14 +298,12 @@ export default function CheckoutPage() {
         }
       }
       
-      // Load districts for regency
       if (address.city) {
         const distRes = await fetch(`/api/locations/districts/${address.city}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const distData = await distRes.json();
         if (distData.success) {
-          // ✅ Format: pastikan field 'code' ada
           const formattedDistricts = (distData.data || []).map((d: any) => ({
             code: d.code || d.id,
             name: d.name,
@@ -307,14 +313,12 @@ export default function CheckoutPage() {
         }
       }
       
-      // Load villages for district
       if (address.district) {
         const villRes = await fetch(`/api/locations/villages/${address.district}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const villData = await villRes.json();
         if (villData.success) {
-          // ✅ Format: pastikan field 'code' ada
           const formattedVillages = (villData.data || []).map((v: any) => ({
             code: v.code || v.id,
             name: v.name,
@@ -330,23 +334,18 @@ export default function CheckoutPage() {
     }
   };
 
-  // Clear locations
   const clearLocations = () => {
     setRegencies([]);
     setDistricts([]);
     setVillages([]);
   };
 
-  // ✅ Parse location codes to full text names (FOR UI DISPLAY ONLY)
   const parseAddressToText = (address: any): string => {
     if (!address) return 'Alamat tidak tersedia';
-    // Get names from parsed locations map, fallback to codes if not found
     const provinceName = parsedLocations.get(address.province) || address.province;
     const cityName = parsedLocations.get(address.city) || address.city;
     const districtName = parsedLocations.get(address.district) || address.district;
     const villageName = parsedLocations.get(address.villageCode) || address.villageCode;
-
-    // Format: Detail, Desa, Kecamatan, Kabupaten, Provinsi KodePos
     return `${address.detail}, ${villageName}, ${districtName}, ${cityName}, ${provinceName} ${address.zipCode}`;
   };
 
@@ -361,7 +360,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // ✅ Open add address form
   const openAddAddress = () => {
     setEditingAddressId(null);
     setAddressForm({
@@ -381,7 +379,6 @@ export default function CheckoutPage() {
     setShowAddressForm(true);
   };
 
-  // ✅ Open edit address form
   const openEditAddress = (address: any) => {
     setEditingAddressId(address.id);
     setAddressForm({
@@ -400,20 +397,17 @@ export default function CheckoutPage() {
     setShowAddressForm(true);
   };
 
-  // ✅ Save address - kirim CODE ke backend + pastikan semua field ada
   const handleSaveAddress = async () => {
     if (!addressForm.detail || !addressForm.villageCode) {
       setError('Lengkapi alamat terlebih dahulu');
       return;
     }
 
-    // ✅ Validasi villageCode 10 digit
     if (!/^\d{10}$/.test(addressForm.villageCode)) {
       setError('Kode desa harus 10 digit angka');
       return;
     }
 
-    // ✅ Validasi recipientName & recipientPhone
     if (!addressForm.recipientName?.trim() || !addressForm.recipientPhone?.trim()) {
       setError('Nama penerima dan no. telepon wajib diisi');
       return;
@@ -425,13 +419,12 @@ export default function CheckoutPage() {
       const url = editingAddressId ? `/api/address/${editingAddressId}` : '/api/address';
       const method = editingAddressId ? 'PUT' : 'POST';
       
-      // ✅ Payload: pastikan semua field required ada (tidak undefined)
       const payload = {
         detail: addressForm.detail || '',
-        province: selectedProvince || '',    // ✅ CODE untuk DB & API
-        city: selectedRegency || '',       // ✅ CODE untuk DB & API
-        district: selectedDistrict || '',  // ✅ CODE untuk DB & API
-        villageCode: addressForm.villageCode || '', // ✅ CODE 10 digit untuk ongkir
+        province: selectedProvince || '',
+        city: selectedRegency || '',
+        district: selectedDistrict || '',
+        villageCode: addressForm.villageCode || '',
         zipCode: addressForm.zipCode || '',
         recipientName: addressForm.recipientName || '',
         recipientPhone: addressForm.recipientPhone || '',
@@ -478,7 +471,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // ✅ Delete address
   const handleDeleteAddress = async (addressId: number) => {
     if (!confirm('Hapus alamat ini?')) return;
     try {
@@ -508,7 +500,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // ✅ Estimate shipping dengan villageCode (10 digit)
   const handleEstimateShipping = async () => {
     if (!selectedAddressId || !selectedAddressData) {
       setError('Silakan pilih alamat terlebih dahulu.');
@@ -518,12 +509,10 @@ export default function CheckoutPage() {
       setError('Keranjang kosong atau total berat tidak valid.');
       return;
     }
-
     if (!originVillageCode) {
       setError('Origin village code produk tidak ditemukan.');
       return;
     }
-
     if (!selectedAddressData.villageCode || selectedAddressData.villageCode.length !== 10) {
       setError('Alamat tidak memiliki kode desa yang valid untuk cek ongkir');
       return;
@@ -534,9 +523,7 @@ export default function CheckoutPage() {
       setEstimating(true);
 
       const token = getCookie('accessToken');
-      if (!token) {
-        throw new Error('Sesi tidak ditemukan.');
-      }
+      if (!token) throw new Error('Sesi tidak ditemukan.');
 
       const res = await fetch('/api/rajaongkir/estimate', {
         method: 'POST',
@@ -552,7 +539,6 @@ export default function CheckoutPage() {
       });
 
       if (!res.ok) {
-        const errorText = await res.text();
         throw new Error(`API Error: ${res.status}`);
       }
 
@@ -569,9 +555,14 @@ export default function CheckoutPage() {
       }));
 
       setCouriers(formattedOptions);
-      setSelectedCourier('');
-      setShippingCost(0);
-      updateGrandTotal(0, paymentFee);
+      
+      if (formattedOptions.length > 0 && !selectedCourier) {
+        setSelectedCourier(formattedOptions[0].id);
+        setShippingCost(formattedOptions[0].price);
+        updateGrandTotal(formattedOptions[0].price, paymentFee);
+      }
+      
+      setHasEstimated(true);
       setSuccess('✅ Opsi pengiriman berhasil dimuat!');
 
     } catch (err: any) {
@@ -579,8 +570,30 @@ export default function CheckoutPage() {
       setError(err.message);
     } finally {
       setEstimating(false);
+      setAutoEstimating(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      hasEstimated || 
+      estimating || 
+      autoEstimating ||
+      !selectedAddressId || 
+      !originVillageCode || 
+      totalWeight <= 0 ||
+      loading
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setAutoEstimating(true);
+      handleEstimateShipping();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [selectedAddressId, originVillageCode, totalWeight, loading]);
 
   const handleShippingChange = (courierId: string, price: number) => {
     setSelectedCourier(courierId);
@@ -597,12 +610,56 @@ export default function CheckoutPage() {
   };
 
   const updateGrandTotal = (shipping: number, fee: number) => {
-    // ✅ Pastikan perhitungan grandTotal benar
     const total = (totalPrice || 0) + (shipping || 0) + (fee || 0);
     setGrandTotal(total);
   };
 
-  // ✅ Place order - SEMUA SYNTAX ERROR DIPERBAIKI
+  // ✅ HELPER: Update payment method in backend
+  const updatePaymentMethod = async (orderId: string, paymentType: string, extraData?: any) => {
+    try {
+      const token = getCookie('accessToken');
+      await fetch('/api/payment/method', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          orderId,
+          paymentType,
+          ...extraData,
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to update payment method:', error);
+    }
+  };
+
+  // ✅ HELPER: Save payment state to database
+  const savePaymentState = async (orderId: string, data: any, event: string) => {
+    try {
+      const token = getCookie('accessToken');
+      
+      await fetch('/api/payment/state', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          orderId,
+          event,
+          timestamp: new Date().toISOString(),
+          ...data,
+        }),
+        keepalive: true,
+      });
+    } catch (error) {
+      console.error('Failed to save payment state:', error);
+    }
+  };
+
+  // ✅ MAIN: Place order dengan Modal Popup
   const handlePlaceOrder = async () => {
     if (!selectedAddressId || !selectedAddressData) {
       setError('Pilih alamat pengiriman terlebih dahulu.');
@@ -612,12 +669,10 @@ export default function CheckoutPage() {
       setError('Pilih opsi pengiriman terlebih dahulu.');
       return;
     }
-
     if (!selectedPayment) {
       setError('Pilih metode pembayaran terlebih dahulu.');
       return; 
     }
-
     if (grandTotal <= 0) {
       setError('Total pembayaran tidak valid.');
       return;
@@ -628,15 +683,16 @@ export default function CheckoutPage() {
       setIsProcessing(true);
 
       const token = getCookie('accessToken');
-      if (!token) {
-        throw new Error('Sesi tidak ditemukan.');
-      }
+      if (!token) throw new Error('Sesi tidak ditemukan.');
 
       const paymentMethod = paymentMethods.find(p => p.id === selectedPayment);
       const orderId = `AGR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // ✅ Simpan order ID untuk modal
+      setCurrentOrderId(orderId);
 
       // 1. Create order in database
-      const orderRes = await fetch('/api/orders', { // ✅ FIX: '/ap i/orders' → '/api/orders'
+      const orderRes = await fetch('/api/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -648,9 +704,9 @@ export default function CheckoutPage() {
           shippingCost: shippingCost,
           totalAmount: grandTotal,
           paymentMethod: paymentMethod?.type || 'cod',
-          paymentGateway: selectedPayment, // ✅ FIX: 'selec tedPayment' → 'selectedPayment'
+          paymentGateway: selectedPayment,
           paymentFee: paymentFee,
-          items: items.map((item: any) => ({ // ✅ FIX: 'item = >' → 'item =>'
+          items: items.map((item: any) => ({
             productId: item.productId,
             price: item.product.price,
             quantity: item.quantity,
@@ -659,13 +715,13 @@ export default function CheckoutPage() {
       });
 
       const orderData = await orderRes.json();
-
-      if (!orderRes.ok) { // ✅ FIX: 'i f' → 'if'
+      if (!orderRes.ok) {
         throw new Error(orderData.error || 'Gagal membuat pesanan');
       }
 
-      // 2. If using payment gateway, call Midtrans
+      // 2. Handle payment
       if (paymentMethod?.type !== 'cod') {
+        // Call Midtrans to get snap token
         const midtransRes = await fetch('/api/payment/midtrans', {
           method: 'POST',
           headers: {
@@ -679,33 +735,62 @@ export default function CheckoutPage() {
           }),
         });
 
-        const midtransData = await midtransRes.json(); // ✅ FIX: 'midtransDa ta' → 'midtransData'
-
+        const midtransData = await midtransRes.json();
         if (!midtransRes.ok) {
           throw new Error(midtransData.error || 'Gagal membuat pembayaran');
         }
 
-        setSuccess('✅ Pesanan berhasil dibuat! Mengalihkan ke pembayaran...');
+        setSuccess('✅ Pesanan berhasil dibuat! Membuka halaman pembayaran...');
         
-        setTimeout(() => { // ✅ FIX: '() = >' → '() =>'
-          window.location.href = midtransData.snapUrl;
-        }, 1500);
-      } else {
-        setSuccess('✅ Pesanan berhasil dibuat!');
-        setTimeout(() => { // ✅ FIX: '() = >' → '() =>'
-          router.push(`/orders/${orderData.orderId}`);
-        }, 1500);
+        // ✅ SET SNAP TOKEN & SHOW MODAL
+        setSnapToken(midtransData.snapToken);
+        setShowPaymentModal(true);
+        
+        // ✅ Snap.js callbacks akan di-handle di PaymentModal component
+        return;
       }
+
+      // 3. COD: redirect directly
+      router.push(`/orders/${orderId}?payment=cod`);
 
     } catch (err: any) {
       console.error('Checkout failed:', err);
       setError(err.message);
-    } finally {
-      setIsProcessing(false); // ✅ FIX: 'setI sProcessing' → 'setIsProcessing'
+      setIsProcessing(false);
     }
   };
 
-  // Location dropdown handlers for form - ✅ Format API response
+  // ✅ CALLBACK: Handle payment modal close
+  const handlePaymentModalClose = async (result?: any) => {
+    setShowPaymentModal(false);
+    
+    if (result?.eventType === 'success') {
+      // Payment successful
+      await updatePaymentMethod(currentOrderId, result.paymentType, {
+        transactionId: result.transactionId,
+      });
+      await savePaymentState(currentOrderId, result, 'success');
+      router.push(`/orders/${currentOrderId}?payment=success`);
+    } else if (result?.eventType === 'pending') {
+      // Payment pending (VA selected)
+      await updatePaymentMethod(currentOrderId, result.paymentType, {
+        vaNumber: result.vaNumber,
+        bank: result.bank,
+      });
+      await savePaymentState(currentOrderId, result, 'pending');
+      router.push(`/orders/${currentOrderId}?payment=pending`);
+    } else if (result?.eventType === 'error') {
+      // Payment error
+      await savePaymentState(currentOrderId, result, 'error');
+      setError('Pembayaran gagal. Silakan coba lagi.');
+    } else {
+      // Modal closed without completing
+      await savePaymentState(currentOrderId, {}, 'modal_closed');
+      router.push(`/orders/${currentOrderId}`);
+    }
+  };
+
+  // Location dropdown handlers
   const handleProvinceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const provinceId = e.target.value;
     setSelectedProvince(provinceId);
@@ -722,7 +807,6 @@ export default function CheckoutPage() {
         });
         const data = await res.json();
         if (data.success) {
-          // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
           const formattedRegencies = (data.data || []).map((r: any) => ({
             code: r.code || r.id,
             name: r.name,
@@ -740,12 +824,7 @@ export default function CheckoutPage() {
 
   const handleCityChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const city = e.target.value;
-    
-    // ✅ Validasi: Harus numeric code (2-6 digit)
-    if (city && !/^\d{2,6}$/.test(city)) {
-      console.error('Invalid city code:', city);
-      return;
-    }
+    if (city && !/^\d{2,6}$/.test(city)) return;
     
     setSelectedRegency(city);
     setAddressForm(prev => ({ ...prev, city, district: '', villageCode: '' }));
@@ -760,7 +839,6 @@ export default function CheckoutPage() {
         });
         const data = await res.json();
         if (data.success) {
-          // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
           const formattedDistricts = (data.data || []).map((d: any) => ({
             code: d.code || d.id,
             name: d.name,
@@ -778,12 +856,7 @@ export default function CheckoutPage() {
 
   const handleDistrictChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const district = e.target.value;
-    
-    // ✅ Validasi: Harus numeric code (2-8 digit)
-    if (district && !/^\d{2,8}$/.test(district)) {
-      console.error('Invalid district code:', district);
-      return;
-    }
+    if (district && !/^\d{2,8}$/.test(district)) return;
     
     setSelectedDistrict(district);
     setAddressForm(prev => ({ ...prev, district, villageCode: '' }));
@@ -797,7 +870,6 @@ export default function CheckoutPage() {
         });
         const data = await res.json();
         if (data.success) {
-          // ✅ Format: pastikan field 'code' ada (fallback ke 'id')
           const formattedVillages = (data.data || []).map((v: any) => ({
             code: v.code || v.id,
             name: v.name,
@@ -837,14 +909,13 @@ export default function CheckoutPage() {
 
       <h1 className="text-3xl font-bold text-text-primary mb-6">Checkout</h1>
 
-      {/* Error & Success Messages */}
+      {/* Messages */}
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3 dark:bg-red-900/20 dark:border-red-800 dark:text-red-200">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <span>{error}</span>
         </div>
       )}
-
       {success && (
         <div className="mb-6 p-4 bg-green-50 border border-green-200 text-green-700 rounded-xl flex items-center gap-3 dark:bg-green-900/20 dark:border-green-800 dark:text-green-200">
           <CheckCircle className="w-5 h-5 flex-shrink-0" />
@@ -853,7 +924,7 @@ export default function CheckoutPage() {
       )}
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Left Column - Forms */}
+        {/* Left Column */}
         <div className="lg:col-span-2 space-y-6">
           
           {/* Address Card */}
@@ -863,230 +934,100 @@ export default function CheckoutPage() {
                 <MapPin className="w-6 h-6 text-primary" />
                 <h2 className="text-xl font-bold text-text-primary">Alamat Pengiriman</h2>
               </div>
-              <button
-                onClick={openAddAddress}
-                className="btn-primary text-sm py-2 px-4"
-              >
-                <Plus className="w-4 h-4 inline mr-1" />
-                Tambah Alamat
+              <button onClick={openAddAddress} className="btn-primary text-sm py-2 px-4">
+                <Plus className="w-4 h-4 inline mr-1" /> Tambah Alamat
               </button>
             </div>
 
-            {/* Address Form Modal (Inline) */}
             {showAddressForm && (
               <div className="bg-surface rounded-xl p-4 mb-4 space-y-4 animate-fade-in dark:bg-surface/50">
                 <div className="flex justify-between items-center">
-                  <h3 className="font-semibold text-text-primary">
-                    {editingAddressId ? 'Edit Alamat' : 'Tambah Alamat Baru'}
-                  </h3>
-                  <button
-                    onClick={() => setShowAddressForm(false)}
-                    className="text-text-secondary hover:text-primary"
-                  >
+                  <h3 className="font-semibold text-text-primary">{editingAddressId ? 'Edit Alamat' : 'Tambah Alamat Baru'}</h3>
+                  <button onClick={() => setShowAddressForm(false)} className="text-text-secondary hover:text-primary">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
               
-                {/* Penerima */}
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-sm text-text-secondary mb-2">Nama Penerima <span className="text-red-500">*</span></label>
-                    <input
-                      type="text"
-                      value={addressForm.recipientName}
-                      onChange={(e) => setAddressForm({ ...addressForm, recipientName: e.target.value })}
-                      placeholder="Nama lengkap"
-                      className="input"
-                      required
-                    />
+                    <input type="text" value={addressForm.recipientName} onChange={(e) => setAddressForm({ ...addressForm, recipientName: e.target.value })} placeholder="Nama lengkap" className="input" required />
                   </div>
                   <div>
                     <label className="block text-sm text-text-secondary mb-2">No. Telepon <span className="text-red-500">*</span></label>
-                    <input
-                      type="tel"
-                      value={addressForm.recipientPhone}
-                      onChange={(e) => setAddressForm({ ...addressForm, recipientPhone: e.target.value })}
-                      placeholder="081234567890"
-                      className="input"
-                      required
-                    />
+                    <input type="tel" value={addressForm.recipientPhone} onChange={(e) => setAddressForm({ ...addressForm, recipientPhone: e.target.value })} placeholder="081234567890" className="input" required />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-sm text-text-secondary mb-2">Alamat Lengkap <span className="text-red-500">*</span></label>
-                  <textarea
-                    value={addressForm.detail}
-                    onChange={(e) => setAddressForm({ ...addressForm, detail: e.target.value })}
-                    placeholder="Jl. Nama Jalan No. 123"
-                    rows={3}
-                    className="input"
-                    required
-                  />
+                  <textarea value={addressForm.detail} onChange={(e) => setAddressForm({ ...addressForm, detail: e.target.value })} placeholder="Jl. Nama Jalan No. 123" rows={3} className="input" required />
                 </div>
 
-                {/* Provinsi */}
                 <div>
                   <label className="block text-sm text-text-secondary mb-2">Provinsi <span className="text-red-500">*</span></label>
-                  <select
-                    value={selectedProvince}
-                    onChange={handleProvinceChange}
-                    className="input"
-                    required
-                  >
+                  <select value={selectedProvince} onChange={handleProvinceChange} className="input" required>
                     <option value="" key="prov-default">Pilih Provinsi</option>
-                    {provinces.map((prov: any) => (
-                      <option key={prov.code} value={prov.code}>
-                        {prov.name}
-                      </option>
-                    ))}
+                    {provinces.map((prov: any) => <option key={prov.code} value={prov.code}>{prov.name}</option>)}
                   </select>
                 </div>
 
-                {/* Kota/Kabupaten */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm text-text-secondary mb-2">Kota/Kabupaten <span className="text-red-500">*</span></label>
-                    <select
-                      value={selectedRegency}
-                      onChange={handleCityChange}
-                      className="input"
-                      disabled={!selectedProvince}
-                      required
-                    >
+                    <select value={selectedRegency} onChange={handleCityChange} className="input" disabled={!selectedProvince} required>
                       <option value="" key="city-default">Pilih Kota</option>
-                      {regencies.map((reg: any) => (
-                        <option key={reg.code} value={reg.code}>
-                          {reg.name}
-                        </option>
-                      ))}
+                      {regencies.map((reg: any) => <option key={reg.code} value={reg.code}>{reg.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm text-text-secondary mb-2">Kecamatan <span className="text-red-500">*</span></label>
-                    <select
-                      value={selectedDistrict}
-                      onChange={handleDistrictChange}
-                      className="input"
-                      disabled={!selectedRegency}
-                      required
-                    >
+                    <select value={selectedDistrict} onChange={handleDistrictChange} className="input" disabled={!selectedRegency} required>
                       <option value="" key="dist-default">Pilih Kecamatan</option>
-                      {districts.map((dist: any) => (
-                        <option key={dist.code} value={dist.code}>
-                          {dist.name}
-                        </option>
-                      ))}
+                      {districts.map((dist: any) => <option key={dist.code} value={dist.code}>{dist.name}</option>)}
                     </select>
                   </div>
                 </div>
 
-                {/* Desa/Kelurahan */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm text-text-secondary mb-2">Desa/Kelurahan <span className="text-red-500">*</span></label>
-                    <select
-                      value={addressForm.villageCode}
-                      onChange={(e) => setAddressForm({ ...addressForm, villageCode: e.target.value })}
-                      className="input"
-                      disabled={!selectedDistrict}
-                      required
-                    >
+                    <select value={addressForm.villageCode} onChange={(e) => setAddressForm({ ...addressForm, villageCode: e.target.value })} className="input" disabled={!selectedDistrict} required>
                       <option value="" key="village-default">Pilih Desa</option>
-                      {villages.map((village: any) => (
-                        <option key={village.code} value={village.code}>
-                          {village.name}
-                        </option>
-                      ))}
+                      {villages.map((village: any) => <option key={village.code} value={village.code}>{village.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm text-text-secondary mb-2">Kode Pos <span className="text-red-500">*</span></label>
-                    <input
-                      type="text"
-                      value={addressForm.zipCode}
-                      onChange={(e) => setAddressForm({ ...addressForm, zipCode: e.target.value })}
-                      placeholder="65111"
-                      className="input"
-                      required
-                    />
+                    <input type="text" value={addressForm.zipCode} onChange={(e) => setAddressForm({ ...addressForm, zipCode: e.target.value })} placeholder="65111" className="input" required />
                   </div>
                 </div>
 
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleSaveAddress} className="btn-primary flex-1" disabled={loadingAddAddress}>
-                    {loadingAddAddress ? (
-                      <> <Loader2 className="w-4 h-4 inline mr-1 animate-spin" />Menyimpan... </>
-                    ) : (
-                      <> <Check className="w-4 h-4 inline mr-1" />Simpan </>
-                    )}
+                    {loadingAddAddress ? <><Loader2 className="w-4 h-4 inline mr-1 animate-spin" />Menyimpan...</> : <><Check className="w-4 h-4 inline mr-1" />Simpan</>}
                   </button>
-                  <button
-                    onClick={() => setShowAddressForm(false)}
-                    className="btn-outline flex-1"
-                    disabled={loadingAddAddress}
-                  >
-                    Batal
-                  </button>
+                  <button onClick={() => setShowAddressForm(false)} className="btn-outline flex-1" disabled={loadingAddAddress}>Batal</button>
                 </div>
               </div>
             )}
 
-            {/* Address List */}
             {addresses.length > 0 ? (
               <div className="space-y-3">
                 {addresses.map((address: any) => (
-                  <div
-                    key={address.id}
-                    className={`border-2 rounded-xl p-4 transition-all ${
-                      selectedAddressId === address.id
-                        ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
-                        : 'border-border hover:border-primary/50 dark:border-border-dark'
-                    }`}
-                  >
+                  <div key={address.id} className={`border-2 rounded-xl p-4 transition-all ${selectedAddressId === address.id ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10' : 'border-border hover:border-primary/50 dark:border-border-dark'}`}>
                     <div className="flex items-start gap-3">
-                      <div
-                        onClick={() => {
-                          setSelectedAddressId(address.id);
-                          setSelectedAddressData(address);
-                        }}
-                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer mt-1 ${
-                          selectedAddressId === address.id
-                            ? 'border-primary bg-primary'
-                            : 'border-border dark:border-border-dark'
-                        }`}
-                      >
-                        {selectedAddressId === address.id && (
-                          <div className="w-2 h-2 rounded-full bg-white" />
-                        )}
+                      <div onClick={() => { setSelectedAddressId(address.id); setSelectedAddressData(address); }} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer mt-1 ${selectedAddressId === address.id ? 'border-primary bg-primary' : 'border-border dark:border-border-dark'}`}>
+                        {selectedAddressId === address.id && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
                       <div className="flex-1">
                         <p className="font-semibold text-text-primary">{address.recipientName || address.detail}</p>
-                        {/* ✅ Display full address text (parsed from codes to names) */}
-                        <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
-                          {parseAddressToText(address)}
-                        </p>
-                        {address.recipientPhone && (
-                          <p className="text-sm text-text-secondary dark:text-text-secondary-dark mt-1">
-                            📞 {address.recipientPhone}
-                          </p>
-                        )}
+                        <p className="text-sm text-text-secondary dark:text-text-secondary-dark">{parseAddressToText(address)}</p>
+                        {address.recipientPhone && <p className="text-sm text-text-secondary dark:text-text-secondary-dark mt-1">📞 {address.recipientPhone}</p>}
                       </div>
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => openEditAddress(address)}
-                          className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors dark:hover:bg-blue-900/20"
-                          title="Edit"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteAddress(address.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors dark:hover:bg-red-900/20"
-                          title="Hapus"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <button onClick={() => openEditAddress(address)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors dark:hover:bg-blue-900/20" title="Edit"><Edit2 className="w-4 h-4" /></button>
+                        <button onClick={() => handleDeleteAddress(address.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors dark:hover:bg-red-900/20" title="Hapus"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     </div>
                   </div>
@@ -1096,9 +1037,7 @@ export default function CheckoutPage() {
               <div className="text-center py-8 text-text-secondary dark:text-text-secondary-dark">
                 <MapPin className="w-12 h-12 mx-auto mb-2 opacity-50" />
                 <p>Belum ada alamat tersimpan</p>
-                <button onClick={openAddAddress} className="btn-primary mt-4">
-                  Tambah Alamat Pertama
-                </button>
+                <button onClick={openAddAddress} className="btn-primary mt-4">Tambah Alamat Pertama</button>
               </div>
             )}
           </div>
@@ -1110,35 +1049,18 @@ export default function CheckoutPage() {
               <h2 className="text-xl font-bold text-text-primary">Pilih Pengiriman</h2>
             </div>
 
-            <button
-              onClick={handleEstimateShipping}
-              disabled={estimating || !selectedAddressId || !originVillageCode || totalWeight <= 0}
-              className={`w-full py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 ${
-                selectedAddressId && originVillageCode && totalWeight > 0 && !estimating
-                  ? 'bg-primary text-white hover:bg-secondary'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-gray-700 dark:text-gray-400'
-              }`}
-            >
-              {estimating ? (
-                <> <Loader2 className="w-5 h-5 animate-spin" /> <span>Menghitung ongkir...</span> </>
-              ) : (
-                <> <Truck className="w-5 h-5" /> <span>Estimasi Ongkir</span> </>
-              )}
-            </button>
+            {(autoEstimating || estimating) && couriers.length === 0 && (
+              <div className="flex items-center justify-center gap-3 py-6 text-text-secondary">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span>Menghitung ongkos kirim...</span>
+              </div>
+            )}
 
             {couriers.length > 0 && (
-              <div className="mt-6 space-y-3">
-                <h3 className="font-semibold text-text-secondary dark:text-text-secondary-dark mb-2">Pilih Layanan Pengiriman</h3>
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-text-secondary dark:text-text-secondary-dark mb-2">Pilih Layanan Pengiriman</h3>
                 {couriers.map((courier: any) => (
-                  <div
-                    key={courier.id}
-                    onClick={() => handleShippingChange(courier.id, courier.price)}
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
-                      selectedCourier === courier.id
-                        ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
-                        : 'border-border hover:border-primary/50 dark:border-border-dark'
-                    }`}
-                  >
+                  <div key={courier.id} onClick={() => handleShippingChange(courier.id, courier.price)} className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${selectedCourier === courier.id ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10' : 'border-border hover:border-primary/50 dark:border-border-dark'}`}>
                     <div className="flex justify-between items-center">
                       <div>
                         <p className="font-semibold text-text-primary">{courier.name}</p>
@@ -1150,9 +1072,13 @@ export default function CheckoutPage() {
                 ))}
               </div>
             )}
+
+            {(!selectedAddressId || totalWeight <= 0) && couriers.length === 0 && !estimating && !autoEstimating && (
+              <p className="text-sm text-text-secondary dark:text-text-secondary-dark text-center py-4">Pilih alamat untuk menghitung ongkos kirim</p>
+            )}
           </div>
 
-          {/* Payment Methods Card */}
+          {/* Payment Methods */}
           <div className="card">
             <div className="flex items-center gap-2 mb-4">
               <CreditCard className="w-6 h-6 text-primary" />
@@ -1167,15 +1093,7 @@ export default function CheckoutPage() {
                   {paymentMethods.filter(p => p.type === 'bank_transfer').map((method) => {
                     const Icon = method.icon;
                     return (
-                      <div
-                        key={method.id}
-                        onClick={() => handlePaymentChange(method.id)}
-                        className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
-                          selectedPayment === method.id
-                            ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
-                            : 'border-border hover:border-primary/50 dark:border-border-dark'
-                        }`}
-                      >
+                      <div key={method.id} onClick={() => handlePaymentChange(method.id)} className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${selectedPayment === method.id ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10' : 'border-border hover:border-primary/50 dark:border-border-dark'}`}>
                         <div className="flex items-center gap-3">
                           <Icon className="w-6 h-6 text-primary" />
                           <div>
@@ -1196,15 +1114,7 @@ export default function CheckoutPage() {
                   {paymentMethods.filter(p => p.type === 'ewallet').map((method) => {
                     const Icon = method.icon;
                     return (
-                      <div
-                        key={method.id}
-                        onClick={() => handlePaymentChange(method.id)}
-                        className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
-                          selectedPayment === method.id
-                            ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
-                            : 'border-border hover:border-primary/50 dark:border-border-dark'
-                        }`}
-                      >
+                      <div key={method.id} onClick={() => handlePaymentChange(method.id)} className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${selectedPayment === method.id ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10' : 'border-border hover:border-primary/50 dark:border-border-dark'}`}>
                         <div className="flex items-center gap-3">
                           <Icon className="w-6 h-6 text-primary" />
                           <div>
@@ -1225,15 +1135,7 @@ export default function CheckoutPage() {
                   {paymentMethods.filter(p => p.type === 'qris' || p.type === 'cod').map((method) => {
                     const Icon = method.icon;
                     return (
-                      <div
-                        key={method.id}
-                        onClick={() => handlePaymentChange(method.id)}
-                        className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
-                          selectedPayment === method.id
-                            ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10'
-                            : 'border-border hover:border-primary/50 dark:border-border-dark'
-                        }`}
-                      >
+                      <div key={method.id} onClick={() => handlePaymentChange(method.id)} className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${selectedPayment === method.id ? 'border-primary bg-primary/5 dark:border-primary dark:bg-primary/10' : 'border-border hover:border-primary/50 dark:border-border-dark'}`}>
                         <div className="flex items-center gap-3">
                           <Icon className="w-6 h-6 text-primary" />
                           <div>
@@ -1248,22 +1150,17 @@ export default function CheckoutPage() {
               </div>
             </div>
 
-            {/* Payment Info */}
             {selectedPayment && (
               <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-                <p className="text-sm text-blue-800 dark:text-blue-200">
-                  ⏰ <strong>Batas Pembayaran:</strong> 24 jam dari sekarang.
-                </p>
+                <p className="text-sm text-blue-800 dark:text-blue-200">⏰ <strong>Batas Pembayaran:</strong> 24 jam dari sekarang.</p>
                 {paymentMethods.find(p => p.id === selectedPayment)?.type !== 'cod' && (
-                  <p className="text-sm text-blue-800 dark:text-blue-200 mt-2">
-                    💡 Anda akan diarahkan ke halaman pembayaran Midtrans.
-                  </p>
+                  <p className="text-sm text-blue-800 dark:text-blue-200 mt-2">💡 Pembayaran akan dibuka di popup.</p>
                 )}
               </div>
             )}
           </div>
 
-          {/* Order Summary Card */}
+          {/* Order Summary */}
           <div className="card">
             <div className="flex items-center gap-2 mb-4">
               <Receipt className="w-6 h-6 text-primary" />
@@ -1292,7 +1189,7 @@ export default function CheckoutPage() {
           </div>
         </div>
 
-        {/* Right Column - Order Summary */}
+        {/* Right Column */}
         <div className="lg:col-span-1">
           <div className="card sticky top-20">
             <h3 className="font-bold text-text-primary mb-4">Produk ({items.length})</h3>
@@ -1320,20 +1217,25 @@ export default function CheckoutPage() {
               className="btn-primary w-full disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {isProcessing ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Memproses...</span>
-                </>
+                <><Loader2 className="w-5 h-5 animate-spin" /><span>Memproses...</span></>
               ) : (
                 `Buat Pesanan (${formatCurrency(grandTotal || 0)})`
               )}
             </button>
-            {!selectedPayment && (
-              <p className="text-xs text-red-500 text-center mt-2 dark:text-red-400">⚠️ Pilih metode pembayaran</p>
-            )}
+            {!selectedPayment && <p className="text-xs text-red-500 text-center mt-2 dark:text-red-400">⚠️ Pilih metode pembayaran</p>}
           </div>
         </div>
       </div>
+
+      {/* ✅ PAYMENT MODAL */}
+      {showPaymentModal && (
+        <PaymentModal
+          isOpen={showPaymentModal}
+          onClose={(result) => handlePaymentModalClose(result)}
+          snapToken={snapToken}
+          orderId={currentOrderId}
+        />
+      )}
     </div>
   );
 }

@@ -4,10 +4,10 @@ import { handleAPIError } from '@/lib/middleware';
 
 export async function GET(req: NextRequest) {
   try {
-    // Get total farmers (users with role 'seller' or 'farmer')
-    const [farmers] = await pool.execute(
-      'SELECT COUNT(*) as count FROM users WHERE role IN (?, ?)',
-      ['seller', 'farmer']
+    // Get total seller (users with role 'seller' or 'farmer')
+    const [seller] = await pool.execute(
+      'SELECT COUNT(*) as count FROM users WHERE role IN (?, ?, ?)',
+      ['seller', 'buyer', 'admin']
     );
 
     // Get total products (active)
@@ -33,16 +33,16 @@ export async function GET(req: NextRequest) {
       ['delivered']
     );
 
-    // Get active cities (unique cityId from addresses in orders)
+    // Get active cities (unique city from addresses in orders)
     const [cities] = await pool.execute(`
-      SELECT COUNT(DISTINCT a.cityId) as count 
+      SELECT COUNT(DISTINCT a.city) as count 
       FROM orders o
       JOIN address a ON o.addressId = a.id
       WHERE o.status != ?
     `, ['cancelled']);
 
     const statistics = {
-      totalFarmers: (farmers as any[])[0]?.count || 0,
+      totalseller: (seller as any[])[0]?.count || 0,
       totalProducts: (products as any[])[0]?.count || 0,
       totalOrders: (orders as any[])[0]?.count || 0,
       totalSold: (sold as any[])[0]?.count || 0,

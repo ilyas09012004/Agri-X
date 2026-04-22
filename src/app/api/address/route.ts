@@ -245,42 +245,75 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-export async function DELETE(req: NextRequest) {
+// ✅ DELETE: Delete address (dengan cek foreign key + soft delete)
+export async function DELETE(req: NextRequest, { params }: Params) {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
     if (!decoded) {
-      throw new Error('Invalid token');
+      return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
     }
 
     const userId = decoded.sub;
-    const { id } = await req.json();
-
-    if (!id) {
-      throw new Error('Address ID is required for deletion.');
+    
+    // ✅ Ambil ID dari URL params
+    const resolvedParams = await params;
+    const addressId = resolvedParams.id;
+    
+    if (!addressId || isNaN(Number(addressId))) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid address ID' },
+        { status: 400 }
+      );
     }
 
+    // ✅ 1. Verifikasi kepemilikan DAN cek apakah belum di-soft-delete
     const [checkRows] = await pool.execute(
-      'SELECT id FROM address WHERE id = ? AND userId = ?',
-      [id, userId]
+      'SELECT id FROM address WHERE id = ? AND userId = ? AND deleted_at IS NULL',
+      [addressId, userId]
     );
 
     if ((checkRows as any[]).length === 0) {
-      throw new Error('Address not found or does not belong to user.');
+      return NextResponse.json(
+        { success: false, error: 'Alamat tidak ditemukan atau sudah dihapus.' },
+        { status: 404 }
+      );
     }
 
+    // ✅ 2. CEK: Apakah alamat ini digunakan di tabel orders?
+    const [orderRefs] = await pool.execute(
+      'SELECT id FROM orders WHERE addressId = ? LIMIT 1',
+      [addressId]
+    );
+
+    if ((orderRefs as any[]).length > 0) {
+      // ✅ Alamat masih dipakai di order history → tidak boleh dihapus
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Alamat tidak dapat dihapus karena masih digunakan dalam riwayat pesanan.',
+          code: 'ADDRESS_IN_USE'
+        },
+        { status: 400 }
+      );
+    }
+
+    // ✅ 3. SOFT DELETE: Update deleted_at вместо DELETE fisik
     const [result] = await pool.execute(
-      'DELETE FROM address WHERE id = ? AND userId = ?',
-      [id, userId]
+      'UPDATE address SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?',
+      [addressId, userId]
     );
 
     if ((result as any).affectedRows === 0) {
-      throw new Error('Address not found or could not be deleted.');
+      return NextResponse.json(
+        { success: false, error: 'Alamat tidak dapat dihapus.' },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({
@@ -290,6 +323,6 @@ export async function DELETE(req: NextRequest) {
 
   } catch (err: any) {
     console.error('Error deleting address:', err);
-    return handleAPIError(err, 'DELETE /api/address');
+    return handleAPIError(err, 'DELETE /api/address/[id]');
   }
 }

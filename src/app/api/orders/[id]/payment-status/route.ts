@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
     // Ambil order dari database
     const [orderRows] = await pool.execute(
-      `SELECT o.*, a.detail as address_detail, a.cityId, a.districtId, a.villageCode, 
+      `SELECT o.*, a.detail as address_detail, a.city, a.district, a.villageCode, 
               a.province, a.zipCode
        FROM orders o
        JOIN address a ON o.addressId = a.id

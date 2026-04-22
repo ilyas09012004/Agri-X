@@ -14,12 +14,7 @@ export async function GET(req: NextRequest) {
         c.name,
         c.slug,
         c.description_category,
-        c.icon,
-        c.color,
-        c.display_order,
-        c.is_active,
-        c.created_at,    -- ✅ FIX: created_at (bukan createdAt)
-        c.updated_at,    -- ✅ FIX: updated_at (bukan updatedAt)
+
         COUNT(p.id) as product_count
       FROM category c
       LEFT JOIN products p ON c.id = p.category_id AND p.status != ?
@@ -32,7 +27,7 @@ export async function GET(req: NextRequest) {
     
     const categories = (rows as any[]).map(c => ({
       ...c,
-      is_active: Boolean(c.is_active),
+      //is_active: Boolean(c.is_active),
       product_count: parseInt(c.product_count) || 0,
       created_at: c.created_at ? new Date(c.created_at).toISOString() : null,
       updated_at: c.updated_at ? new Date(c.updated_at).toISOString() : null,
