@@ -8,21 +8,6 @@ import { getCookie } from '@/lib/auth';
 import { useCart } from '@/context/CartContext';
 import { formatCurrency } from '@/lib/utils';
 
-interface CartItem {
-  id: string;
-  productId: number;
-  quantity: number;
-  product: {
-    id: number;
-    name: string;
-    price: number;
-    image?: string;
-    stock: number;
-    min_order: number;
-    status: 'pre_order' | 'ready_stock' | 'sold_out';
-    unit: string;
-  };
-}
 
 export default function CartPage() {
   const router = useRouter();
@@ -220,8 +205,8 @@ export default function CartPage() {
           {items.map((item) => (
             <div key={item.id} className="card flex gap-4">
               <div className="w-24 h-24 bg-gradient-to-br from-secondary/20 to-primary/20 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 overflow-hidden">
-                {item.product.image ? (
-                  <img src={item.product.image} alt={item.product.name} className="w-full h-full object-cover rounded-xl" />
+                {item.product.image_path ? (
+                  <img src={item.product.image_path} alt={item.product.name} className="w-full h-full object-cover rounded-xl" />
                 ) : (
                   <span>🌾</span>
                 )}

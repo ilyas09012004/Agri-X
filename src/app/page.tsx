@@ -11,7 +11,7 @@ import {
   Leaf, ShoppingCart, TrendingUp, Users, Star, ArrowRight,
   Flame, // ✅ Icon baru untuk "Terlaris"
 } from 'lucide-react';
-import { productAPI, statisticsAPI, reviewAPI } from '@/lib/api'; // ✅ Hapus categoryAPI
+import { productAPI, statisticsAPI, reviewAPI } from '@/lib/api';
 
 // ============================================
 // ✅ TYPE DEFINITIONS
@@ -24,7 +24,7 @@ interface Product {
   price: number;
   unit: string;
   stock: number;
-  sold_count: number; // ✅ Field baru: jumlah terjual
+  sold_count: number;
   origin_village_code?: string;
   min_order: number;
   seller_id: number;
@@ -64,6 +64,8 @@ interface Statistics {
 export default function HomePage() {
   const { user, isAuthenticated } = useAuth();
   const { totalItems } = useCart();
+  
+  // ✅ Gunakan useTheme untuk mendapatkan tema aktif
   const { theme, resolvedTheme } = useTheme();
   
   const [products, setProducts] = useState<Product[]>([]);
@@ -71,11 +73,6 @@ export default function HomePage() {
   const [statistics, setStatistics] = useState<Statistics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Debug theme (opsional)
-  useEffect(() => {
-    console.log('[HomePage] Theme:', theme, 'Resolved:', resolvedTheme);
-  }, [theme, resolvedTheme]);
 
   useEffect(() => {
     fetchAllData();
@@ -86,19 +83,19 @@ export default function HomePage() {
       setIsLoading(true);
       setError(null);
 
-      // ✅ FIX: Fetch products dengan sort by sold_count DESC (paling laris di atas)
+      const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+      // ✅ Fetch data parallel
       const [productsRes, reviewsRes, statsRes] = await Promise.allSettled([
-        // ✅ Tambah limit=4 di query string
-        fetch('/api/products?sort=sold_count&order=desc&limit=5', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
-        }).then(res => res.json()),
+        fetch('/api/products?sort=sold_count&order=desc&limit=5', { headers })
+          .then(res => res.json()),
         reviewAPI.getTopRated(5),
         statisticsAPI.getDashboard(),
       ]);
 
       // Process products
       if (productsRes.status === 'fulfilled' && productsRes.value?.success) {
-        // Filter hanya produk ready_stock & pre-order (hapus deleted/sold_out dari homepage)
         const filtered = (productsRes.value.products || []).filter((p: Product) => 
           p.status === 'ready_stock' || p.status === 'pre-order'
         );
@@ -129,19 +126,16 @@ export default function HomePage() {
     return num.toString();
   };
 
-  
-
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex items-center justify-center bg-background dark:bg-background-dark">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-          <p className="text-text-secondary">Memuat data...</p>
+          <p className="text-text-secondary dark:text-text-secondary-dark">Memuat data...</p>
         </div>
       </div>
     );
   }
-
   return (
     <div className="animate-fade-in min-h-screen pb-20" data-theme={resolvedTheme}>
       <Header />

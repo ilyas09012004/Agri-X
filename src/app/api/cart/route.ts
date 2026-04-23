@@ -1,3 +1,4 @@
+// src/app/api/cart/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import pool from '@/lib/db';
@@ -6,81 +7,88 @@ import { handleAPIError } from '@/lib/middleware';
 // ==================== GET: Ambil Cart Items ====================
 export async function GET(req: NextRequest) {
   try {
+    // 1. Auth Check
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
     if (!decoded) {
-      throw new Error('Invalid token');
+      return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
     }
 
     const userId = decoded.sub;
 
-    // ✅ Query: Ambil field yang diperlukan (status sudah termasuk)
-    const [cartItems] = await pool.execute(`
-      SELECT 
-        ci.id as cartId,
-        ci.userId,
-        ci.productId,
+    // 2. Query Data Cart + Product Details
+    // ✅ TAMBAHKAN 'p.weight' di sini agar berat produk ikut terambil
+    const [rows] = await pool.execute(
+      `SELECT 
+        ci.id as cart_id,
+        ci.product_id,
         ci.quantity,
-        ci.createdAt,
-        ci.updatedAt,
-        p.name as productName,
-        p.price as productPrice,
-        p.image_path as productImage,
-        p.stock as productStock,
-        p.min_order as productMinOrder,
-        p.status as productStatus,
-        p.po_quota as productPoQuota,
-        p.po_sold as productPoSold,
-        p.harvest_date as productHarvestDate,
-        p.origin_village_code as productOriginVillageCode
-      FROM cartitems ci
-      JOIN products p ON ci.productId = p.id
-      WHERE ci.userId = ?
-    `, [userId]);
+        p.id as product_id,
+        p.name as product_name,
+        p.price as product_price,
+        p.image_path as product_image_path,
+        p.stock as product_stock,
+        p.min_order as product_min_order,
+        p.status as product_status,
+        p.unit as product_unit,
+        p.weight as product_weight,          -- ✅ BARU: Ambil berat
+        p.origin_village_code as product_origin_village_code -- ✅ PENTING: Untuk cek ongkir
+       FROM cart_items ci
+       INNER JOIN products p ON ci.product_id = p.id
+       WHERE ci.user_id = ?`,
+      [userId]
+    );
 
-    const formattedCartItems = (Array.isArray(cartItems) ? cartItems : []).map((item: any) => ({
-      id: item.cartId,
-      userId: item.userId,
-      productId: item.productId,
-      quantity: item.quantity,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
+    // 3. Format Data agar rapi di Frontend
+    const formattedItems = (rows as any[]).map((row) => ({
+      id: row.cart_id,
+      productId: row.product_id,
+      quantity: row.quantity,
       product: {
-        id: item.productId,
-        name: item.productName,
-        price: item.productPrice,
-        image: item.productImage,
-        stock: item.productStock,
-        min_order: item.productMinOrder,
-        status: item.productStatus, // 'ready_stock' | 'pre-order' | 'sold_out' | 'deleted'
-        // ✅ Field Pre-Order (hanya relevan jika status === 'pre-order')
-        po_quota: item.productPoQuota,
-        po_sold: item.productPoSold,
-        harvest_date: item.productHarvestDate,
-        // Field existing untuk kompatibilitas
-        weight: item.productStock,
-        originVillageCode: item.productOriginVillageCode,
-      }
+        id: row.product_id,
+        name: row.product_name,
+        price: Number(row.product_price),
+        image_path: row.product_image_path,
+        stock: Number(row.product_stock),
+        min_order: Number(row.product_min_order),
+        status: row.product_status,
+        unit: row.product_unit,
+        weight: Number(row.product_weight) || 0, // ✅ BARU: Kirim berat ke frontend
+        originVillageCode: row.product_origin_village_code, // ✅ PENTING: Kirim kode desa asal
+      },
     }));
 
-    const totalWeight = formattedCartItems.reduce((sum, item) => {
-      const itemWeight = item.product.stock || 0;
-      return sum + (itemWeight * item.quantity);
+    // 4. Hitung Total di Backend (Single Source of Truth)
+    const totalItems = formattedItems.length;
+    
+    const totalQuantity = formattedItems.reduce((sum, item) => sum + item.quantity, 0);
+    
+    const totalPrice = formattedItems.reduce((sum, item) => {
+      return sum + (item.product.price * item.quantity);
     }, 0);
 
+    // ✅ HITUNG TOTAL BERAT DI BACKEND
+    // Berat total = Sum(berat_satuan * quantity)
+    const totalWeight = formattedItems.reduce((sum, item) => {
+      return sum + (item.product.weight * item.quantity);
+    }, 0);
+
+    // 5. Return JSON
     return NextResponse.json({
       success: true,
-       formattedCartItems,
-      totalWeight
+      formattedCartItems: formattedItems,
+      totalItems,
+      totalQuantity,
+      totalPrice,
+      totalWeight, // ✅ BARU: Kirim total berat ke frontend
     });
 
   } catch (err: any) {
-    console.error('Error fetching cart:', err);
     return handleAPIError(err, 'GET /api/cart');
   }
 }
@@ -106,9 +114,9 @@ export async function POST(req: NextRequest) {
       throw new Error('Product ID and quantity are required');
     }
 
-    // ✅ Query: Ambil status dan field Pre-Order
+    // ✅ Query: Pakai snake_case & ambil weight untuk validasi jika perlu
     const [productRows] = await pool.execute(
-      `SELECT id, stock, min_order, status, po_quota, po_sold, harvest_date 
+      `SELECT id, stock, min_order, status, po_quota, po_sold, harvest_date, weight 
        FROM products WHERE id = ? AND status != ?`,
       [productId, 'deleted']
     );
@@ -124,7 +132,7 @@ export async function POST(req: NextRequest) {
       throw new Error('Product is currently sold out.');
     }
 
-    // ✅ LOGIKA PRE-ORDER: Gunakan status === 'pre-order'
+    // ✅ LOGIKA PRE-ORDER
     if (product.status === 'pre-order') {
       const remainingQuota = (product.po_quota || 0) - (product.po_sold || 0);
       
@@ -136,15 +144,12 @@ export async function POST(req: NextRequest) {
         throw new Error('Tanggal panen Pre-Order belum ditetapkan oleh petani.');
       }
 
-      // ✅ FIX: Handle harvest_date yang bisa berupa Date object atau string
+      // Handle harvest_date validation
       let harvestDate: Date;
-      
       if (product.harvest_date instanceof Date) {
-        // MySQL2 driver mengembalikan Date object untuk kolom DATE
         harvestDate = new Date(product.harvest_date);
         harvestDate.setHours(0, 0, 0, 0);
       } else if (typeof product.harvest_date === 'string') {
-        // Fallback jika berupa string 'YYYY-MM-DD'
         const [year, month, day] = product.harvest_date.split('-').map(Number);
         harvestDate = new Date(year, (month || 1) - 1, day || 1);
       } else {
@@ -161,7 +166,7 @@ export async function POST(req: NextRequest) {
         throw new Error(`Tanggal panen Pre-Order (${dateStr}) sudah lewat. Hubungi petani untuk konfirmasi.`);
       }
     }
-    // ✅ LOGIKA READY_STOCK: Validasi stok (existing logic - TIDAK DIUBAH)
+    // ✅ LOGIKA READY_STOCK
     else if (product.status === 'ready_stock') {
       if (quantity < product.min_order) {
         throw new Error(`Quantity must be at least ${product.min_order}`);
@@ -170,14 +175,13 @@ export async function POST(req: NextRequest) {
         throw new Error(`Insufficient stock. Available: ${product.stock}`);
       }
     }
-    // ✅ Status lain tidak tersedia untuk dibeli
     else {
       throw new Error('Product is currently unavailable.');
     }
 
     // Cek apakah produk sudah ada di keranjang
     const [existingCartRows] = await pool.execute(
-      'SELECT id, quantity FROM cartitems WHERE userId = ? AND productId = ?',
+      'SELECT id, quantity FROM cart_items WHERE user_id = ? AND product_id = ?',
       [userId, productId]
     );
 
@@ -199,12 +203,11 @@ export async function POST(req: NextRequest) {
       }
 
       await pool.execute(
-        'UPDATE cartitems SET quantity = ?, updatedAt = CURRENT_TIMESTAMP WHERE userId = ? AND productId = ?',
+        'UPDATE cart_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND product_id = ?',
         [newQuantity, userId, productId]
       );
     } else {
       // Insert baru
-      // ✅ Validasi ulang untuk insert
       if (product.status === 'pre-order') {
         const remainingQuota = (product.po_quota || 0) - (product.po_sold || 0);
         if (quantity > remainingQuota) {
@@ -217,7 +220,7 @@ export async function POST(req: NextRequest) {
       }
 
       await pool.execute(
-        'INSERT INTO cartitems (userId, productId, quantity, createdAt, updatedAt) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+        'INSERT INTO cart_items (user_id, product_id, quantity, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
         [userId, productId, quantity]
       );
     }
@@ -251,10 +254,10 @@ export async function PUT(req: NextRequest) {
       throw new Error('Product ID and quantity are required');
     }
 
-    // ✅ Hapus item jika quantity = 0 (existing logic)
+    // ✅ Hapus item jika quantity = 0
     if (quantity === 0) {
       const [deleteResult] = await pool.execute(
-        'DELETE FROM cartitems WHERE userId = ? AND productId = ?',
+        'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
         [userId, productId]
       );
 
@@ -265,7 +268,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ success: true, message: 'Product removed from cart successfully' });
     }
 
-    // ✅ Ambil produk dengan field Pre-Order
+    // ✅ Ambil produk
     const [productRows] = await pool.execute(
       `SELECT id, stock, min_order, status, po_quota, po_sold, harvest_date 
        FROM products WHERE id = ? AND status != ?`,
@@ -282,7 +285,7 @@ export async function PUT(req: NextRequest) {
       throw new Error('Product is currently sold out.');
     }
 
-    // ✅ VALIDASI PRE-ORDER: Gunakan status === 'pre-order'
+    // ✅ VALIDASI PRE-ORDER
     if (product.status === 'pre-order') {
       const remainingQuota = (product.po_quota || 0) - (product.po_sold || 0);
       
@@ -293,10 +296,8 @@ export async function PUT(req: NextRequest) {
         throw new Error(`Kuota Pre-Order tersisa ${remainingQuota}.`);
       }
       
-      // ✅ FIX: Handle harvest_date yang bisa berupa Date object atau string
       if (product.harvest_date) {
         let harvestDate: Date;
-        
         if (product.harvest_date instanceof Date) {
           harvestDate = new Date(product.harvest_date);
           harvestDate.setHours(0, 0, 0, 0);
@@ -318,7 +319,7 @@ export async function PUT(req: NextRequest) {
         }
       }
     }
-    // ✅ VALIDASI READY_STOCK (existing logic - TIDAK DIUBAH)
+    // ✅ VALIDASI READY_STOCK
     else if (product.status === 'ready_stock') {
       if (quantity < product.min_order) {
         throw new Error(`Quantity must be at least ${product.min_order}`);
@@ -330,9 +331,9 @@ export async function PUT(req: NextRequest) {
       throw new Error('Product is currently unavailable.');
     }
 
-    // Update quantity
+    // ✅ Update quantity
     const [result] = await pool.execute(
-      'UPDATE cartitems SET quantity = ?, updatedAt = CURRENT_TIMESTAMP WHERE userId = ? AND productId = ?',
+      'UPDATE cart_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND product_id = ?',
       [quantity, userId, productId]
     );
 
@@ -373,9 +374,9 @@ export async function PATCH(req: NextRequest) {
       throw new Error('Delta must be an integer (e.g., +2, -1)');
     }
 
-    // Ambil item keranjang saat ini
+    // ✅ Ambil item keranjang saat ini
     const [cartRows] = await pool.execute(
-      'SELECT quantity FROM cartitems WHERE userId = ? AND productId = ?',
+      'SELECT quantity FROM cart_items WHERE user_id = ? AND product_id = ?',
       [userId, productId]
     );
 
@@ -386,10 +387,10 @@ export async function PATCH(req: NextRequest) {
     const currentQuantity = (cartRows as any[])[0].quantity;
     const newQuantity = currentQuantity + delta;
 
-    // Jika hasilnya <= 0, hapus item (existing logic)
+    // Jika hasilnya <= 0, hapus item
     if (newQuantity <= 0) {
       await pool.execute(
-        'DELETE FROM cartitems WHERE userId = ? AND productId = ?',
+        'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
         [userId, productId]
       );
       return NextResponse.json({ 
@@ -398,7 +399,7 @@ export async function PATCH(req: NextRequest) {
       });
     }
 
-    // ✅ Ambil produk dengan field Pre-Order
+    // ✅ Ambil produk
     const [productRows] = await pool.execute(
       `SELECT id, stock, min_order, status, po_quota, po_sold, harvest_date 
        FROM products WHERE id = ? AND status != ?`,
@@ -407,7 +408,7 @@ export async function PATCH(req: NextRequest) {
 
     if ((productRows as any[]).length === 0) {
       await pool.execute(
-        'DELETE FROM cartitems WHERE userId = ? AND productId = ?',
+        'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
         [userId, productId]
       );
       throw new Error('Product is no longer available');
@@ -419,7 +420,7 @@ export async function PATCH(req: NextRequest) {
       throw new Error('Product is currently sold out.');
     }
 
-    // ✅ VALIDASI PRE-ORDER: Gunakan status === 'pre-order'
+    // ✅ VALIDASI PRE-ORDER
     if (product.status === 'pre-order') {
       const remainingQuota = (product.po_quota || 0) - (product.po_sold || 0);
       
@@ -430,10 +431,8 @@ export async function PATCH(req: NextRequest) {
         throw new Error(`Kuota Pre-Order tersisa ${remainingQuota}.`);
       }
       
-      // ✅ FIX: Handle harvest_date yang bisa berupa Date object atau string
       if (product.harvest_date) {
         let harvestDate: Date;
-        
         if (product.harvest_date instanceof Date) {
           harvestDate = new Date(product.harvest_date);
           harvestDate.setHours(0, 0, 0, 0);
@@ -455,7 +454,7 @@ export async function PATCH(req: NextRequest) {
         }
       }
     }
-    // ✅ VALIDASI READY_STOCK (existing logic)
+    // ✅ VALIDASI READY_STOCK
     else if (product.status === 'ready_stock') {
       if (newQuantity < product.min_order) {
         throw new Error(`Quantity must be at least ${product.min_order}`);
@@ -467,9 +466,9 @@ export async function PATCH(req: NextRequest) {
       throw new Error('Product is currently unavailable.');
     }
 
-    // Update quantity
+    // ✅ Update quantity
     await pool.execute(
-      'UPDATE cartitems SET quantity = ?, updatedAt = CURRENT_TIMESTAMP WHERE userId = ? AND productId = ?',
+      'UPDATE cart_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND product_id = ?',
       [newQuantity, userId, productId]
     );
 
@@ -506,9 +505,9 @@ export async function DELETE(req: NextRequest) {
       throw new Error('Product ID is required');
     }
 
-    // Hapus item (existing logic - TIDAK DIUBAH)
+    // ✅ Hapus item
     const [result] = await pool.execute(
-      'DELETE FROM cartitems WHERE userId = ? AND productId = ?',
+      'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
       [userId, productId]
     );
 

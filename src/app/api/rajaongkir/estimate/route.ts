@@ -1,62 +1,79 @@
+// src/app/api/rajaongkir/estimate/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { handleAPIError } from '@/lib/middleware'; // Import middleware kamu
 
 export async function POST(req: NextRequest) {
   try {
-    const { origin_village_code, destination_village_code, weight, courier } = await req.json();
+    const body = await req.json();
+    const { origin_village_code, destination_village_code, weight } = body;
 
     if (!origin_village_code || !destination_village_code || !weight) {
-      throw new Error('Missing required fields: origin_village_code, destination_village_code, weight');
+      return NextResponse.json(
+        { success: false, error: 'Data tidak lengkap.' },
+        { status: 400 }
+      );
     }
 
-    // Bangun URL dengan query parameters
-    // Perbaiki URL dari 'https://use.api.co.id/expedition/shipping-cost  ' menjadi tanpa spasi di akhir
-    const url = new URL('https://use.api.co.id/expedition/shipping-cost');
-    url.searchParams.append('origin_village_code', origin_village_code);
-    url.searchParams.append('destination_village_code', destination_village_code);
-    url.searchParams.append('weight', weight.toString());
-    if (courier) {
-      url.searchParams.append('courier', courier);
+    const apiKey = process.env.API_CO_ID_KEY;
+    if (!apiKey) {
+      console.error('❌ API Key Missing');
+      return NextResponse.json(
+        { success: false, error: 'Konfigurasi server salah (API Key hilang).' },
+        { status: 500 }
+      );
     }
 
-    // Kirim ke api.co.id
-    const response = await fetch(url.toString(), {
-      method: 'GET', // Gunakan GET karena API.co.id mengharapkan query params
+    // Request ke API Eksternal
+    const url = `https://use.api.co.id/expedition/shipping-cost?origin_village_code=${origin_village_code}&destination_village_code=${destination_village_code}&weight=${weight}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
       headers: {
-        'x-api-co-id': process.env.API_CO_ID_KEY || '',
+        'x-api-co-id': apiKey,
       },
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('API.co.id HTTP Error:', response.status, errorText);
-      throw new Error(`API.co.id Error: ${response.status} - ${errorText}`);
+      const errText = await response.text();
+      throw new Error(`External API Error: ${response.status} - ${errText}`);
     }
 
-    const data = await response.json();
-    console.log('API.co.id Raw Response:', data);
+    const rawData = await response.json();
+    
+    // ✅ DEBUG: Lihat struktur asli di console terminal server
+    // console.log('RAW API RESPONSE:', JSON.stringify(rawData, null, 2));
 
-    if (!data.is_success || !data.data || !Array.isArray(data.data.couriers)) {
-      console.error('API.co.id response structure invalid:', data);
-      throw new Error('Invalid response structure from API.co.id');
+    // Validasi struktur response (sesuaikan dengan dokumentasi api.co.id)
+    // Biasanya: { is_success: true, data: { couriers: [...] } }
+    if (!rawData.is_success || !rawData.data || !rawData.data.couriers) {
+       // Fallback jika struktur beda, coba cek array langsung di data
+       if (Array.isArray(rawData.data)) {
+          // Handle jika data langsung array
+       } else {
+          throw new Error('Format response API tidak dikenali.');
+       }
     }
 
-    // Format data untuk frontend
-    const formattedData = data.data.couriers.map((item: any) => ({
-      service: item.courier_name || item.courier_code || 'Unknown Service',
-      description: `(${item.courier_code}) ${item.estimation || 'Estimasi tidak tersedia'}`,
-      value: item.price,
-      etd: item.estimation || 'N/A'
+    const couriers = rawData.data.couriers;
+
+    // Format ulang agar konsisten dengan frontend
+    const formattedData = couriers.map((item: any) => ({
+      code: item.courier_code || item.code || 'unknown',
+      service: item.courier_name || item.service || 'Layanan Tidak Dikenal',
+      value: item.price || 0,
+      etd: item.estimation || '-',
+      description: `${item.courier_name} (${item.estimation})`
     }));
 
     return NextResponse.json({
       success: true,
-       formattedData
+      formattedData
     });
 
-  } catch (err: any) {
-    console.error('API.co.id error:', err);
-    // Gunakan middleware handleAPIError untuk menangani error
-    return handleAPIError(err, 'POST /api/rajaongkir/estimate');
+  } catch (error: any) {
+    console.error('❌ Ongkir Error:', error.message);
+    return NextResponse.json(
+      { success: false, error: error.message || 'Gagal menghitung ongkir' },
+      { status: 500 }
+    );
   }
 }

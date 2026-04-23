@@ -98,7 +98,8 @@ export default function AccountPage() {
       }
 
       if (activeTab === 'orders') {
-        const res = await fetch(`/api/orders?status=${orderFilter}`, {
+        // Pastikan endpoint ini mengembalikan data.orders dengan struktur camelCase
+        const res = await fetch(`/api/orders/user/${user?.id}?status=${orderFilter}`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
         if (res.ok) {
@@ -488,41 +489,63 @@ export default function AccountPage() {
                 <div 
                   key={order.id} 
                   className="card cursor-pointer hover:shadow-lg transition-shadow"
-                  onClick={() => router.push(`/orders/${order.id}`)}
+                  onClick={() => router.push(`/orders/${order.orderId || order.id}`)}
                 >
                   <div className="flex justify-between items-center mb-4 pb-4 border-b border-border">
                     <div>
-                      <span className="font-semibold text-text-primary">Order #{order.id}</span>
+                      <span className="font-semibold text-text-primary">Order #{order.orderId || order.id}</span>
                       <p className="text-sm text-text-secondary">{formatDate(order.createdAt)}</p>
                     </div>
                     {getStatusBadge(order.status)}
                   </div>
                   
-                  <div className="space-y-3 mb-4">
-                    {order.orderItems?.slice(0, 3).map((item: any, index: number) => (
-                      <div key={index} className="flex gap-4">
-                        <div className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center text-2xl overflow-hidden flex-shrink-0">
+                  {/* ✅ UPDATED: Product Items List */}
+                  <div className="space-y-4 mb-4">
+                    {order.items?.slice(0, 3).map((item: any, index: number) => (
+                      <div key={index} className="flex gap-4 items-start">
+                        {/* Product Image */}
+                        <div className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0 border border-border">
                           {item.productImage ? (
-                            <img src={item.productImage} alt={item.productName} className="w-full h-full object-cover" />
+                            <img 
+                              src={item.productImage} 
+                              alt={item.productName} 
+                              className="w-full h-full object-cover" 
+                            />
                           ) : (
-                            <span>🌾</span>
+                            <span className="text-2xl grayscale opacity-50">📦</span>
                           )}
                         </div>
+
+                        {/* Product Details */}
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-text-primary truncate">{item.productName}</p>
-                          <p className="text-sm text-text-secondary">
-                            {item.quantity} {item.unit || 'kg'} × {formatCurrency(item.price || item.priceAtOrder || 0)}
-                          </p>
-                          <p className="font-bold text-primary">
-                            {formatCurrency((item.price || item.priceAtOrder || 0) * item.quantity)}
-                          </p>
+                          <h4 className="text-sm font-semibold text-text-primary truncate mb-1">
+                            {item.productName}
+                          </h4>
+                          
+                          <div className="flex flex-wrap justify-between items-end gap-2">
+                            <div className="text-xs text-text-secondary">
+                              <p>{item.quantity} {item.productUnit || 'pcs'} x {formatCurrency(item.price)}</p>
+                            </div>
+                            <p className="text-sm font-bold text-primary">
+                              {formatCurrency(item.subtotal)}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     ))}
-                    {order.orderItems?.length > 3 && (
-                      <p className="text-sm text-text-secondary text-center">
-                        +{order.orderItems.length - 3} produk lainnya
-                      </p>
+
+                    {/* More Items Indicator */}
+                    {order.items && order.items.length > 3 && (
+                      <div className="text-center pt-2 border-t border-dashed border-border">
+                        <p className="text-xs font-medium text-text-secondary">
+                          +{order.items.length - 3} produk lainnya
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Fallback if no items */}
+                    {(!order.items || order.items.length === 0) && (
+                      <p className="text-sm text-text-secondary italic text-center py-2">Detail produk tidak tersedia.</p>
                     )}
                   </div>
 
@@ -530,14 +553,14 @@ export default function AccountPage() {
                     <div>
                       <p className="text-sm text-text-secondary">Total Pembayaran</p>
                       <p className="font-bold text-lg text-primary">
-                        {formatCurrency(order.grandTotal || order.grand_total || 0)}
+                        {formatCurrency(order.grandTotal)}
                       </p>
                     </div>
                     <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                       {order.status === 'pending' && order.paymentMethod !== 'cod' && (
                         <button 
                           className="btn-primary px-4 py-2 text-sm flex items-center gap-1" 
-                          onClick={() => router.push(`/orders/${order.id}/pay`)}
+                          onClick={() => router.push(`/orders/${order.orderId || order.id}/pay`)}
                         >
                           <CreditCard className="w-4 h-4" />
                           Bayar
@@ -551,7 +574,7 @@ export default function AccountPage() {
                       {order.status === 'shipped' && (
                         <button 
                           className="btn-primary px-4 py-2 text-sm flex items-center gap-1" 
-                          onClick={() => router.push(`/orders/${order.id}`)}
+                          onClick={() => router.push(`/orders/${order.orderId || order.id}`)}
                         >
                           <Truck className="w-4 h-4" />
                           Lacak
@@ -559,7 +582,7 @@ export default function AccountPage() {
                       )}
                       <button 
                         className="btn-outline px-4 py-2 text-sm flex items-center gap-1" 
-                        onClick={() => router.push(`/orders/${order.id}`)}
+                        onClick={() => router.push(`/orders/${order.orderId || order.id}`)}
                       >
                         Detail
                         <ArrowRight className="w-4 h-4" />

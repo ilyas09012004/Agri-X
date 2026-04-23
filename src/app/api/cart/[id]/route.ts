@@ -13,15 +13,16 @@ type Params = {
 // ============================================
 export async function PUT(req: NextRequest, { params }: Params) {
   try {
+    // 1. Auth Check
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessTokenServer(token);
     if (!decoded) {
-      throw new Error('Invalid token');
+      return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
     }
 
     const userId = decoded.sub;
@@ -29,97 +30,84 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const productId = resolvedParams.id;
 
     if (!productId || isNaN(Number(productId))) {
-      throw new Error('Invalid product ID');
+      return NextResponse.json({ success: false, error: 'Invalid product ID' }, { status: 400 });
     }
 
-    const { quantity } = await req.json();
+    const body = await req.json();
+    const { quantity } = body;
 
-    if (quantity === undefined || quantity < 1) {
-      throw new Error('Quantity is required and must be at least 1');
+    if (quantity === undefined || quantity === null || quantity < 1) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Quantity is required and must be at least 1' 
+      }, { status: 400 });
     }
 
-    // ✅ DEBUG: Log untuk troubleshooting
-    console.log('=== UPDATE CART DEBUG ===');
-    console.log('userId:', userId);
-    console.log('productId:', productId);
-    console.log('quantity:', quantity);
-
-    // Ambil data item keranjang dan produk terkait
+    // 2. Get Cart Item & Product Details (Snake_case)
     const [cartItemRows] = await pool.execute(
-      `SELECT ci.id, ci.userId, ci.productId, ci.quantity, p.stock, p.min_order, p.status 
-       FROM cartitems ci 
-       INNER JOIN products p ON ci.productId = p.id 
-       WHERE ci.productId = ? AND ci.userId = ?`,
+      `SELECT ci.id, ci.user_id, ci.product_id, ci.quantity, 
+              p.stock, p.min_order, p.status, p.weight
+       FROM cart_items ci 
+       INNER JOIN products p ON ci.product_id = p.id 
+       WHERE ci.product_id = ? AND ci.user_id = ?`,
       [Number(productId), userId]
     );
 
-    console.log('Cart item rows:', cartItemRows);
-
     if ((cartItemRows as any[]).length === 0) {
-      throw new Error('Cart item not found or does not belong to user');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Item tidak ditemukan di keranjang.' 
+      }, { status: 404 });
     }
 
     const cartItem = (cartItemRows as any[])[0];
+    const productStatus = cartItem.status?.toLowerCase();
 
-    // ✅ DEBUG: Log status produk
-    console.log('Product status:', cartItem.status);
-    console.log('Product stock:', cartItem.stock);
-    console.log('Product min_order:', cartItem.min_order);
-
-    // ✅ FIX: Handle berbagai kemungkinan status produk
-    // Status yang mungkin: 'ready_stock', 'pre_order', 'sold_out', 'active', 'inactive', 'deleted'
-    const status = cartItem.status?.toLowerCase();
-
-    if (status === 'sold_out' || status === 'deleted') {
-      throw new Error('Product is currently sold out.');
+    // 3. Validation Logic
+    
+    // Cek jika produk sudah dihapus atau tidak aktif
+    if (productStatus === 'deleted' || productStatus === 'inactive') {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Produk ini tidak lagi tersedia.' 
+      }, { status: 400 });
     }
 
-    // ✅ Handle 'active' sebagai 'ready_stock'
-    if (status === 'active' || status === 'ready_stock') {
-      if (quantity < cartItem.min_order) {
-        throw new Error(`Quantity must be at least ${cartItem.min_order}`);
-      }
-      if (quantity > cartItem.stock) {
-        throw new Error(`Insufficient stock. Available: ${cartItem.stock}`);
-      }
-    } 
-    // ✅ Handle 'pre_order'
-    else if (status === 'pre_order') {
-      if (quantity < cartItem.min_order) {
-        throw new Error(`Quantity must be at least ${cartItem.min_order} for pre-order items.`);
-      }
+    // Cek Min Order
+    const minOrder = Number(cartItem.min_order) || 1;
+    if (quantity < minOrder) {
+      return NextResponse.json({ 
+        success: false, 
+        error: `Minimal pembelian untuk produk ini adalah ${minOrder}.` 
+      }, { status: 400 });
     }
-    // ✅ Handle 'inactive' atau status lain yang tidak dikenali
-    else if (status === 'inactive') {
-      throw new Error('Product is currently inactive.');
-    }
-    else {
-      // ✅ DEFAULT: Anggap sebagai ready_stock jika status tidak dikenali
-      console.warn('Unknown product status:', status, '- Treating as ready_stock');
-      if (quantity < cartItem.min_order) {
-        throw new Error(`Quantity must be at least ${cartItem.min_order}`);
-      }
-      if (quantity > cartItem.stock) {
-        throw new Error(`Insufficient stock. Available: ${cartItem.stock}`);
+
+    // Cek Stock (Hanya untuk produk Ready Stock)
+    // Pre-order biasanya tidak dibatasi stock fisik saat checkout
+    if (productStatus === 'ready_stock') {
+      const availableStock = Number(cartItem.stock) || 0;
+      if (quantity > availableStock) {
+        return NextResponse.json({ 
+          success: false, 
+          error: `Stok tidak mencukupi. Tersisa: ${availableStock}` 
+        }, { status: 400 });
       }
     }
 
-    // Update quantity
+    // 4. Update Quantity (Snake_case columns)
     await pool.execute(
-      `UPDATE cartitems SET quantity = ? WHERE productId = ? AND userId = ?`,
+      `UPDATE cart_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP 
+       WHERE product_id = ? AND user_id = ?`,
       [quantity, Number(productId), userId]
     );
 
-    console.log('=== UPDATE SUCCESS ===');
-
     return NextResponse.json({ 
       success: true, 
-      message: 'Cart item quantity updated successfully',
+      message: 'Jumlah produk berhasil diperbarui',
       data: { productId, quantity }
     });
 
   } catch (err: any) {
-    console.error('Error updating cart item quantity (PUT):', err);
     return handleAPIError(err, 'PUT /api/cart/[id]');
   }
 }
@@ -129,15 +117,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
 // ============================================
 export async function DELETE(req: NextRequest, { params }: Params) {
   try {
+    // 1. Auth Check
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized');
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessTokenServer(token);
     if (!decoded) {
-      throw new Error('Invalid token');
+      return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
     }
 
     const userId = decoded.sub;
@@ -145,27 +134,29 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     const productId = resolvedParams.id;
 
     if (!productId || isNaN(Number(productId))) {
-      throw new Error('Invalid product ID');
+      return NextResponse.json({ success: false, error: 'Invalid product ID' }, { status: 400 });
     }
 
-    // Hapus item dari tabel cartitems
+    // 2. Delete Item (Snake_case columns)
     const [result] = await pool.execute(
-      `DELETE FROM cartitems WHERE productId = ? AND userId = ?`,
+      `DELETE FROM cart_items WHERE product_id = ? AND user_id = ?`,
       [Number(productId), userId]
     );
 
     if ((result as any).affectedRows === 0) {
-      throw new Error('Cart item not found or does not belong to user');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Item tidak ditemukan di keranjang.' 
+      }, { status: 404 });
     }
 
     return NextResponse.json({ 
       success: true, 
-      message: 'Cart item removed successfully',
+      message: 'Produk berhasil dihapus dari keranjang',
       data: { productId }
     });
 
   } catch (err: any) {
-    console.error('Error removing cart item:', err);
     return handleAPIError(err, 'DELETE /api/cart/[id]');
   }
 }

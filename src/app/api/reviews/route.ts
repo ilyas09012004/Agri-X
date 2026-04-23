@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { handleAPIError } from '@/lib/middleware';
+import { keysToCamelCase } from '@/lib/utils'; 
 
 export async function GET(req: NextRequest) {
   try {
@@ -8,60 +9,69 @@ export async function GET(req: NextRequest) {
     const productId = searchParams.get('productId');
     const rating = searchParams.get('rating');
     const isVerified = searchParams.get('isVerified');
-    const limit = searchParams.get('limit') || '5';
+    const limit = parseInt(searchParams.get('limit') || '5');
+    const offset = parseInt(searchParams.get('offset') || '0'); // Tambah pagination offset
 
-    // ✅ UPDATE: Tambahkan u.avatar ke SELECT
+    // ✅ QUERY DB: Gunakan snake_case untuk nama kolom database
     let query = `
       SELECT 
         r.id,
-        r.userId,
-        r.productId,
-        r.orderId,
+        r.user_id,       
+        r.product_id,    
+        r.order_id,      
         r.rating,
         r.comment,
-        r.is_verified,
-        r.created_at,
-        r.updated_at,
-        u.name as user_name,
-        u.avatar as user_avatar,
-        u.email as user_email,
-        p.name as product_name
+        r.is_verified,   
+        r.created_at,    
+        r.updated_at,    
+        u.name AS user_name,
+        u.avatar AS user_avatar,
+        u.email AS user_email,
+        p.name AS product_name
       FROM reviews r
-      JOIN users u ON r.userId = u.id
-      LEFT JOIN products p ON r.productId = p.id
+      JOIN users u ON r.user_id = u.id       
+      LEFT JOIN products p ON r.product_id = p.id 
       WHERE 1=1
     `;
+    
     const params: any[] = [];
 
+    // Filter by Product ID
     if (productId) {
-      query += ' AND r.productId = ?';
+      query += ' AND r.product_id = ?'; // ✅ snake_case
       params.push(productId);
     }
 
+    // Filter by Rating
     if (rating) {
       query += ' AND r.rating = ?';
-      params.push(rating);
+      params.push(parseInt(rating));
     }
 
+    // Filter by Verified Status
     if (isVerified !== null && isVerified !== undefined) {
-      query += ' AND r.is_verified = ?';
+      query += ' AND r.is_verified = ?'; // ✅ snake_case
       params.push(isVerified === 'true' ? 1 : 0);
     }
 
+    // Default: Hanya tampilkan review terverifikasi ATAU yang punya komentar
     query += ' AND (r.is_verified = 1 OR r.comment IS NOT NULL)';
-    query += ' ORDER BY r.created_at DESC LIMIT ?';
-    params.push(parseInt(limit));
+    
+    // Ordering & Pagination
+    query += ' ORDER BY r.created_at DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
 
+    // Execute Query
     const [rows] = await pool.execute(query, params);
-    const reviews = (rows as any[]).map(r => ({
-      ...r,
-      is_verified: Boolean(r.is_verified),
-      created_at: r.created_at ? new Date(r.created_at).toISOString() : null,
-      updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null,
-      user_avatar: r.user_avatar || null,
-    }));
 
-    return NextResponse.json({ success: true, reviews });
+    // ✅ CONVERT: Ubah hasil DB (snake_case) -> JSON Response (camelCase)
+    const reviews = keysToCamelCase(rows);
+
+    return NextResponse.json({ 
+      success: true, 
+      reviews,
+      pagination: { limit, offset } // Info pagination opsional
+    });
 
   } catch (error: any) {
     console.error('Error fetching reviews:', error);
@@ -76,7 +86,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
+    const userId = 1; // Placeholder untuk testing
+
     const body = await req.json();
+    // Frontend mengirim camelCase: { productId, orderId, rating, comment }
     const { productId, orderId, rating, comment } = body;
 
     if (!productId || !rating) {
@@ -86,13 +99,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get userId from token (implement your token verification)
-    const userId = 1; // Replace with actual token decoding
-
+    // ✅ INSERT DB: Gunakan snake_case untuk nama kolom database
     const [result] = await pool.execute(
-      `INSERT INTO reviews (userId, productId, orderId, rating, comment, is_verified, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [userId, productId, orderId || null, rating, comment || null, 1]
+      `INSERT INTO reviews (
+        user_id,      
+        product_id,  
+        order_id,     
+        rating,
+        comment,
+        is_verified,  
+        created_at,   
+        updated_at    
+      ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        userId, 
+        productId, 
+        orderId || null, 
+        rating, 
+        comment || null, 
+        1 // Default is_verified = 1 (atau 0 jika butuh moderasi admin)
+      ]
     );
 
     return NextResponse.json({ 

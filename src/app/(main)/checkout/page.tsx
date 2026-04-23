@@ -1197,8 +1197,8 @@ export default function CheckoutPage() {
               {items.map((item: any) => (
                 <div key={item.id} className="flex gap-3">
                   <div className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden dark:bg-surface/50">
-                    {item.product.image ? (
-                      <img src={item.product.image} alt={item.product.name} className="w-full h-full object-cover" />
+                    {item.product.image_path ? (
+                      <img src={item.product.image_path} alt={item.product.name} className="w-full h-full object-cover" />
                     ) : (
                       <span>🌾</span>
                     )}

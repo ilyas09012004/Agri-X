@@ -20,15 +20,6 @@ export async function GET(req: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1];
-    
-    const tokenParts = token.split('.');
-    if (tokenParts.length !== 3) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid token format', code: 'INVALID_TOKEN' },
-        { status: 401 }
-      );
-    }
-
     const decoded = verifyAccessTokenServer(token);
     
     if (!decoded) {
@@ -45,6 +36,7 @@ export async function GET(req: NextRequest) {
     let statusCondition = '';
     let queryParams: any[] = [userId];
 
+    // Filter Status
     if (status) {
       switch (status) {
         case 'pending':
@@ -73,60 +65,64 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ✅ Query menggunakan snake_case (user_id, address_id, dll)
     const [orders] = await pool.execute(`
       SELECT 
         o.id,
-        o.userId,
-        o.addressId,
+        o.user_id,
+        o.address_id,
         o.status,
-        o.paymentStatus,
-        o.paymentMethod,
-        o.paymentGateway,
-        o.vaNumber,
-        o.paymentDeadline,
-        o.totalProductPrice,
-        o.shippingCost,
-        o.grandTotal,
-        o.createdAt,
-        o.updatedAt
+        o.payment_status,
+        o.payment_method,
+        o.payment_gateway,
+        o.va_number,
+        o.payment_deadline,
+        o.total_product_price,
+        o.shipping_cost,
+        o.grand_total,
+        o.created_at,
+        o.updated_at
       FROM orders o
-      WHERE o.userId = ? ${statusCondition}
-      ORDER BY o.createdAt DESC
+      WHERE o.user_id = ? ${statusCondition}
+      ORDER BY o.created_at DESC
     `, queryParams);
 
     const ordersArray = orders as any[];
 
-    const ordersWithItems = await Promise.all(
+    // ✅ Fetch details for each order
+    const ordersWithDetails = await Promise.all(
       ordersArray.map(async (order) => {
+        // 1. Get Order Items
         const [items] = await pool.execute(`
           SELECT 
             oi.id,
-            oi.orderId,
-            oi.productId,
-            oi.priceAtOrder,
+            oi.order_id,
+            oi.product_id,
+            oi.price_at_order,
             oi.quantity,
-            p.name as productName,
-            p.image_path as productImage,
+            p.name as product_name,
+            p.image_path as product_image,
             p.unit
           FROM order_items oi
-          JOIN products p ON oi.productId = p.id
-          WHERE oi.orderId = ?
+          JOIN products p ON oi.product_id = p.id
+          WHERE oi.order_id = ?
         `, [order.id]);
 
+        // 2. Get Address
         const [addressRows] = await pool.execute(`
-          SELECT detail, city, district, villageCode, province, zipCode
+          SELECT detail, city, district, village_code, province, zip_code, recipient_name, recipient_phone
           FROM address
           WHERE id = ?
-        `, [order.addressId]);
+        `, [order.address_id]);
 
         const address = (addressRows as any[])[0] || {};
 
-        // ✅ Ambil info payment dari tabel payment
+        // 3. Get Latest Payment Info
         const [paymentRows] = await pool.execute(`
-          SELECT id, method, amount, status, transaction_id, paymentType, createdAt
+          SELECT id, method, amount, status, transaction_id, payment_type, created_at
           FROM payment
-          WHERE ordersId = ?
-          ORDER BY createdAt DESC
+          WHERE order_id = ?
+          ORDER BY created_at DESC
           LIMIT 1
         `, [order.id]);
 
@@ -138,13 +134,15 @@ export async function GET(req: NextRequest) {
             detail: address.detail || '',
             city: address.city || '',
             district: address.district || '',
-            villageCode: address.villageCode || '',
+            villageCode: address.village_code || '', // Map ke camelCase untuk frontend jika perlu
             province: address.province || '',
-            zipCode: address.zipCode || '',
+            zipCode: address.zip_code || '',
+            recipientName: address.recipient_name || '',
+            recipientPhone: address.recipient_phone || '',
           },
           orderItems: Array.isArray(items) ? items.map((item: any) => ({
             ...item,
-            price: item.priceAtOrder,
+            price: item.price_at_order,
           })) : [],
           payment: payment,
         };
@@ -153,12 +151,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      orders: ordersWithItems,
-      count: ordersWithItems.length,
+      orders: ordersWithDetails,
+      count: ordersWithDetails.length,
     });
 
   } catch (err: any) {
-    console.error('Error fetching orders:', err);
     return handleAPIError(err, 'GET /api/orders');
   }
 }
@@ -170,34 +167,23 @@ export async function POST(req: NextRequest) {
   let connection;
   
   try {
-    console.log('=== ORDER API CALLED ===');
-    
     const authHeader = req.headers.get('Authorization');
-    console.log('Auth header:', authHeader ? 'EXISTS' : 'MISSING');
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('No auth header');
       throw new Error('Unauthorized');
     }
 
     const token = authHeader.split(' ')[1];
-    console.log('Token:', token ? token.substring(0, 20) + '...' : 'MISSING');
-    
     const decoded = verifyAccessTokenServer(token);
-    console.log('Decoded token:', decoded);
     
     if (!decoded) {
-      console.log('Invalid token');
       throw new Error('Invalid token');
     }
 
     const userId = decoded.sub;
-    console.log('userId:', userId);
-
     const body = await req.json();
-    console.log('Request body:', JSON.stringify(body, null, 2));
 
-    // ✅ Parse body dengan flexible field names
+    // ✅ Parse body (support both camelCase & snake_case input)
     const addressId = body.addressId || body.address_id;
     const shippingCost = body.shippingCost || body.shipping_cost || 0;
     const paymentFee = body.paymentFee || body.payment_fee || 0;
@@ -206,78 +192,53 @@ export async function POST(req: NextRequest) {
     const paymentGateway = body.paymentGateway || body.payment_gateway || null;
     const items = body.items || body.cartItems || body.products;
 
-    console.log('Parsed data:');
-    console.log('  addressId:', addressId);
-    console.log('  shippingCost:', shippingCost);
-    console.log('  paymentFee:', paymentFee);
-    console.log('  totalAmount:', totalAmount);
-    console.log('  paymentMethod:', paymentMethod);
-    console.log('  paymentGateway:', paymentGateway);
-    console.log('  items:', items);
-    console.log('  items.length:', items?.length);
-
     if (!addressId) {
-      console.log('Missing addressId');
       throw new Error('Address ID is required');
     }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
-      console.log('Missing or empty items');
       throw new Error('Cart items are required');
     }
 
-    console.log('Checking address ownership...');
+    // ✅ Verify Address Ownership (snake_case columns)
     const [addressCheck] = await pool.execute(
-      `SELECT id FROM address WHERE id = ? AND userId = ?`,
+      `SELECT id FROM address WHERE id = ? AND user_id = ?`,
       [addressId, userId]
     );
 
-    console.log('Address check result:', addressCheck);
-
     if ((addressCheck as any[]).length === 0) {
-      console.log('Address not found or does not belong to user');
       throw new Error('Address not found or does not belong to user');
     }
 
-    console.log('Getting connection for transaction...');
+    // ✅ Start Transaction
     connection = await pool.getConnection();
-    
-    console.log('Starting transaction...');
     await connection.query('START TRANSACTION');
 
     try {
-      // ✅ Hitung total dari items
+      // 1. Calculate Totals
       const totalProductPrice = items.reduce((sum: number, item: any) => {
         return sum + ((item.price || 0) * (item.quantity || 1));
       }, 0);
 
       const grandTotal = totalProductPrice + shippingCost + paymentFee;
+      const initialPaymentStatus = 'pending';
 
-      console.log('Calculated totals:');
-      console.log('  totalProductPrice:', totalProductPrice);
-      console.log('  shippingCost:', shippingCost);
-      console.log('  paymentFee:', paymentFee);
-      console.log('  grandTotal:', grandTotal);
-
-      // ✅ Tentukan paymentStatus awal
-      const initialPaymentStatus = paymentMethod === 'cod' ? 'pending' : 'pending';
-
-      console.log('Inserting order...');
+      // 2. Insert Order (snake_case columns)
       const [orderResult] = await connection.execute(`
         INSERT INTO orders (
-          userId, 
-          addressId, 
+          user_id, 
+          address_id, 
           status, 
-          paymentStatus,
-          paymentMethod,
-          paymentGateway,
-          totalProductPrice, 
-          shippingCost,
-          paymentFee,
-          grandTotal, 
-          paymentDeadline,
-          createdAt, 
-          updatedAt
+          payment_status,
+          payment_method,
+          payment_gateway,
+          total_product_price, 
+          shipping_cost,
+          payment_fee,
+          grand_total, 
+          payment_deadline,
+          created_at, 
+          updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW(), NOW())
       `, [
         userId, 
@@ -293,23 +254,20 @@ export async function POST(req: NextRequest) {
       ]);
 
       const orderId = (orderResult as any).insertId;
-      console.log('Order created with ID:', orderId);
 
-      // ✅ Proses items & kurangi stok
+      // 3. Process Items & Reduce Stock
       for (const item of items) {
         const productId = item.productId || item.id;
         const price = item.price || 0;
         const quantity = item.quantity || 1;
 
-        console.log('Processing item:', { productId, price, quantity });
-
+        // Check Product Availability
         const [productCheck] = await connection.execute(
           `SELECT id, stock, status FROM products WHERE id = ?`,
           [productId]
         );
 
         const product = (productCheck as any[])[0];
-        console.log('Product check:', product);
         
         if (!product) {
           throw new Error(`Product ${productId} not found`);
@@ -323,73 +281,61 @@ export async function POST(req: NextRequest) {
           throw new Error(`Insufficient stock for product ${productId}. Available: ${product.stock}`);
         }
 
+        // Insert Order Item (snake_case)
         await connection.execute(`
           INSERT INTO order_items (
-            orderId, 
-            productId, 
-            priceAtOrder, 
+            order_id, 
+            product_id, 
+            price_at_order, 
             quantity
           ) VALUES (?, ?, ?, ?)
         `, [orderId, productId, price, quantity]);
 
+        // Update Stock
         await connection.execute(
           `UPDATE products SET stock = stock - ? WHERE id = ?`,
           [quantity, productId]
         );
-
-        console.log('Item processed:', productId);
       }
 
-      // ✅ Clear cart
-      await connection.execute(`DELETE FROM cartitems WHERE userId = ?`, [userId]);
-      console.log('Cart cleared for user:', userId);
+      // 4. Clear Cart (snake_case)
+      await connection.execute(`DELETE FROM cart_items WHERE user_id = ?`, [userId]);
 
-      // ✅ Generate Payment URL via Midtrans (jika bukan COD)
+      // 5. Handle Payment (Midtrans or COD)
       let paymentUrl = null;
       let transactionId = null;
       let vaNumber = null;
 
       if (paymentMethod !== 'cod') {
-        console.log('Generating Midtrans payment URL...');
-        
-        // ✅ FIX: Ambil data user DAN address (dengan recipientPhone) untuk Midtrans
+        // Get User & Address Details for Midtrans (snake_case joins)
         const [orderDetails] = await connection.execute(
           `SELECT 
              u.name as user_name, 
              u.email as user_email,
-             a.recipientPhone as recipient_phone,
+             a.recipient_phone,
              a.detail as address_detail,
              a.city as address_city,
              a.district as address_district,
-             a.villageCode as address_village,
+             a.village_code as address_village,
              a.province as address_province,
-             a.zipCode as address_zip
+             a.zip_code as address_zip
            FROM orders o
-           JOIN users u ON o.userId = u.id
-           JOIN address a ON o.addressId = a.id
+           JOIN users u ON o.user_id = u.id
+           JOIN address a ON o.address_id = a.id
            WHERE o.id = ?`,
-          [orderId] // orderId dari hasil insert order sebelumnya
+          [orderId]
         );
 
         const orderDetailsData = (orderDetails as any[])[0];
-
-        // Format order_id untuk Midtrans
         const midtransOrderId = `AGR-${orderId}-${Date.now()}`;
 
-        // ✅ FIX: Gunakan recipient_phone dari address (bukan phone dari users)
-        // ✅ FIX: Format tanggal untuk Midtrans
+        // Helper for Midtrans Date Format
         const formatMidtransDateTime = (date: Date): string => {
           const pad = (n: number) => String(n).padStart(2, '0');
-          const year = date.getFullYear();
-          const month = pad(date.getMonth() + 1);
-          const day = pad(date.getDate());
-          const hours = pad(date.getHours());
-          const minutes = pad(date.getMinutes());
-          const seconds = pad(date.getSeconds());
-          return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} +0700`;
+          return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} +0700`;
         };
 
-        // ✅ Parameter untuk Midtrans Snap (FIXED)
+        // Midtrans Parameter
         const parameter = {
           transaction_details: {
             order_id: midtransOrderId,
@@ -417,13 +363,11 @@ export async function POST(req: NextRequest) {
             }
           },
           enabled_payments: [paymentGateway === 'qris' ? 'qris' : paymentGateway],
-          // ✅ FIX: Format start_time sesuai requirement Midtrans
           expiry: {
-            start_time: formatMidtransDateTime(new Date()), // "2026-01-22 17:30:00 +0700"
+            start_time: formatMidtransDateTime(new Date()),
             unit: 'hours',
             duration: 24,
           },
-          // ✅ Opsional: Tambahkan custom_expiry untuk batas waktu pembayaran
           custom_expiry: {
             start_time: formatMidtransDateTime(new Date()),
             unit: 'hours',
@@ -431,63 +375,56 @@ export async function POST(req: NextRequest) {
           }
         };
 
-        console.log('Midtrans parameter:', JSON.stringify(parameter, null, 2));
-
-        // Generate Snap Token
+        // Create Midtrans Transaction
         const snapResponse = await snap.createTransaction(parameter);
-        console.log('Midtrans response:', snapResponse);
-
+        
         paymentUrl = snapResponse.redirect_url;
         transactionId = snapResponse.token;
 
-        // Extract VA number jika bank transfer
         if (snapResponse.va_numbers && snapResponse.va_numbers.length > 0) {
           vaNumber = snapResponse.va_numbers[0].va_number;
         }
 
-        // ✅ Update order dengan transaction ID, payment URL, dan VA number
+        // Update Order with Payment Info (snake_case)
         await connection.execute(
-          `UPDATE orders SET orderId = ?, paymentUrl = ?, vaNumber = ? WHERE id = ?`,
+          `UPDATE orders SET order_id = ?, payment_url = ?, va_number = ? WHERE id = ?`,
           [transactionId, paymentUrl, vaNumber, orderId]
         );
 
-        // ✅ CATAT DI TABEL PAYMENT (sesuai struktur kamu)
+        // Insert Payment Record (snake_case)
         await connection.execute(
           `INSERT INTO payment (
-            ordersId, 
+            order_id, 
             method, 
             amount, 
             status, 
             transaction_id,
-            paymentType,
-            createdAt, 
-            updatedAt
+            payment_type,
+            created_at, 
+            updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
           [orderId, paymentGateway, grandTotal, 'pending', transactionId, paymentGateway]
         );
 
-        console.log('Payment record created in payment table');
       } else {
-        // ✅ Untuk COD, catat payment dengan status pending
+        // COD Payment Record
         await connection.execute(
           `INSERT INTO payment (
-            ordersId, 
+            order_id, 
             method, 
             amount, 
             status, 
             transaction_id,
-            paymentType,
-            createdAt, 
-            updatedAt
+            payment_type,
+            created_at, 
+            updated_at
           ) VALUES (?, ?, ?, ?, NULL, NULL, NOW(), NOW())`,
           [orderId, 'cod', grandTotal, 'pending']
         );
-
-        console.log('COD payment record created');
       }
 
+      // ✅ Commit Transaction
       await connection.query('COMMIT');
-      console.log('Transaction committed');
 
       return NextResponse.json({
         success: true,
@@ -511,33 +448,25 @@ export async function POST(req: NextRequest) {
       });
 
     } catch (error: any) {
-      console.error('Transaction error, rolling back:', error.message);
+      // ✅ Rollback on Error
       await connection.query('ROLLBACK');
       throw error;
     } finally {
       if (connection) {
         connection.release();
-        console.log('Connection released');
       }
     }
 
   } catch (err: any) {
+    // Ensure rollback if connection exists but transaction wasn't committed
     if (connection) {
       try {
         await connection.query('ROLLBACK');
         connection.release();
       } catch (rollbackError) {
-        console.error('Rollback error:', rollbackError);
+        // Ignore rollback error if already rolled back
       }
     }
-
-    console.error('=== ORDER API ERROR ===');
-    console.error('Error name:', err.name);
-    console.error('Error message:', err.message);
-    console.error('Error code:', err.code);
-    console.error('Error errno:', err.errno);
-    console.error('=======================');
-    
     return handleAPIError(err, 'POST /api/orders');
   }
 }

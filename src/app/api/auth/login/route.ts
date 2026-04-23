@@ -53,12 +53,12 @@ export async function POST(req: NextRequest) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 hari
 
-    /*await pool.execute(
+    await pool.execute(
       `INSERT INTO user_sessions 
-        (user_id, refresh_token, ip_address, user_agent, expires_at) 
+        (user_id, refresh_token_hash, ip_address, user_agent, expires_at) 
        VALUES (?, ?, ?, ?, ?)`,
       [user.id, refreshToken, ip, userAgent, expiresAt]
-    );*/
+    );
 
     // Set cookies (HANYA accessToken di body, refreshToken HANYA di cookie HttpOnly)
     const headers = new Headers();

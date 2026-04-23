@@ -1,299 +1,250 @@
-// src/app/api/products/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { randomUUID } from 'crypto'; // Tidak digunakan di file ini kecuali untuk POST di collection route
 import { handleAPIError } from '@/lib/middleware';
-import { verifyAccessToken } from '@/lib/auth';
+// import { verifyAccessToken } from '@/lib/auth'; // Uncomment jika butuh proteksi admin
 
 type Params = {
   params: Promise<{ id: string }>;
 };
 
+// Helper: Validasi ID numerik
+const isValidId = (id: string) => /^\d+$/.test(id);
+
+// Helper: Format Product Data untuk Response (Clean Data)
+const formatProductResponse = (product: any) => {
+  if (!product) return null;
+  return {
+    id: Number(product.id),
+    name: product.name,
+    description: product.description,
+    price: Number(product.price),
+    unit: product.unit || 'kg',
+    stock: Number(product.stock),
+    min_order: Number(product.min_order),
+    seller_id: Number(product.seller_id),
+    harvest_date: product.harvest_date ? new Date(product.harvest_date).toISOString().split('T')[0] : null,
+    image_path: product.image_path,
+    category: product.category,
+    status: product.status,
+    created_at: product.created_at ? new Date(product.created_at).toISOString() : null,
+    updated_at: product.updated_at ? new Date(product.updated_at).toISOString() : null,
+  };
+};
+
+// ============================================================================
+// GET: Get Single Product by ID
+// ============================================================================
 export async function GET(req: NextRequest, { params }: Params) {
   try {
-    const resolvedParams = await params;
-    const productId = resolvedParams.id;
+    const { id } = await params;
 
-    if (!productId) {
+    if (!isValidId(id)) {
       return NextResponse.json(
-        { success: false, error: 'Product ID is missing', code: 'MISSING_ID' },
+        { success: false, error: 'Invalid product ID format' },
         { status: 400 }
       );
     }
 
-    if (!/^\d+$/.test(productId)) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid product ID format', code: 'INVALID_ID' },
-        { status: 400 }
-      );
-    }
-
-    // ✅ FIX: Gunakan image_path bukan image
     const query = `
       SELECT 
         id, name, description, price, unit, stock, min_order, seller_id, 
         harvest_date, image_path, category, status, created_at, updated_at 
       FROM products 
-      WHERE id = ? AND status != ?
+      WHERE id = ? AND status != 'deleted'
     `;
     
-    const [rows] = await pool.execute(query, [parseInt(productId, 10), 'deleted']);
-
-    console.log('Query Result:', rows);
-    console.log('Rows Count:', Array.isArray(rows) ? rows.length : 0);
+    const [rows] = await pool.execute(query, [id]);
 
     if (!Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json(
-        { success: false, error: 'Product not found', code: 'NOT_FOUND' },
+        { success: false, error: 'Product not found' },
         { status: 404 }
       );
     }
 
-    const product = rows[0];
-
-    // Format response
-    const formattedProduct = {
-      id: product.id,
-      name: product.name,
-      description: product.description,
-      price: parseFloat(product.price) || 0,
-      unit: product.unit || 'kg',
-      stock: product.stock || 0,
-      min_order: product.min_order || 1,
-      seller_id: product.seller_id,
-      harvest_date: product.harvest_date,
-      image_path: product.image_path,
-      category: product.category,
-      status: product.status,
-      rating: 0, // Bisa ditambahkan nanti dari reviews
-      reviews: 0,
-      created_at: product.created_at,
-      updated_at: product.updated_at,
-    };
-
-    console.log('Formatted Product:', formattedProduct);
-
     return NextResponse.json({
       success: true,
-      product: formattedProduct,
+      product: formatProductResponse(rows[0]),
     });
 
   } catch (error: any) {
-    console.error('Error fetching product by ID:', error);
+    console.error('Error fetching product:', error);
     return handleAPIError(error, 'GET /api/products/[id]');
   }
 }
 
-
-// PUT: Ganti SELURUH resource
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+// ============================================================================
+// PUT: Update Entire Product (Replace)
+// ============================================================================
+export async function PUT(req: NextRequest, { params }: Params) {
   try {
-    const productId = params.id;
-
-    if (!/^\d+$/.test(productId)) {
-      return NextResponse.json({ success: false, error: 'Invalid product ID format. Must be numeric.' }, { status: 400 });
+    const { id } = await params;
+    if (!isValidId(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid product ID' }, { status: 400 });
     }
 
-    const body: Omit<Product, 'id' | 'created_at' | 'updated_at'> = await req.json();
+    const body = await req.json();
+    const { 
+      name, description, price, unit, stock, min_order, 
+      seller_id, harvest_date, image_path, category, status 
+    } = body;
 
-    const { name, description, price, unit, stock, min_order, seller_id, harvest_date, image_path, category, status } = body;
-
+    // ✅ Validasi Wajib
     if (!name || price === undefined || unit === undefined || seller_id === undefined) {
-      return NextResponse.json({ success: false, error: 'Name, price, unit, and seller_id are required' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Name, price, unit, and seller_id are required' }, 
+        { status: 400 }
+      );
     }
 
-    // ✅ Ganti validasi UUID dengan validasi numerik
-    if (!/^\d+$/.test(String(seller_id))) { // Konversi ke string dulu untuk test regex
-      return NextResponse.json({ success: false, error: 'Invalid seller_id format. Must be numeric.' }, { status: 400 });
-    }
-    // ✅ Sampai sini
+    // ✅ Validasi Tipe Data & Logika
+    const numPrice = Number(price);
+    const numStock = Number(stock || 0);
+    const numMinOrder = Number(min_order || 1);
+    const numSellerId = Number(seller_id);
 
-    const allowedStatuses: Array<'pre-order' | 'ready_stock' | 'sold_out' | 'deleted'> = ['pre-order', 'ready_stock', 'sold_out', 'deleted'];
-    if (status && !allowedStatuses.includes(status)) {
-      return NextResponse.json({ success: false, error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }, { status: 400 });
-    }
+    if (isNaN(numPrice) || numPrice < 0) return NextResponse.json({ success: false, error: 'Invalid price' }, { status: 400 });
+    if (isNaN(numStock) || numStock < 0) return NextResponse.json({ success: false, error: 'Invalid stock' }, { status: 400 });
+    if (isNaN(numMinOrder) || numMinOrder < 1) return NextResponse.json({ success: false, error: 'Invalid min_order' }, { status: 400 });
+    if (isNaN(numSellerId)) return NextResponse.json({ success: false, error: 'Invalid seller_id' }, { status: 400 });
 
-    if (price < 0 || stock < 0 || min_order < 1) {
-      return NextResponse.json({ success: false, error: 'Price, stock must be non-negative, min_order must be at least 1' }, { status: 400 });
-    }
+    const allowedStatuses = ['pre-order', 'ready_stock', 'sold_out', 'deleted'];
+    const finalStatus = status && allowedStatuses.includes(status) ? status : 'ready_stock';
 
     const query = `
       UPDATE products
-      SET name = ?, description = ?, price = ?, unit = ?, stock = ?, min_order = ?, seller_id = ?, harvest_date = ?, image_path = ?, category = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      SET name = ?, description = ?, price = ?, unit = ?, stock = ?, 
+          min_order = ?, seller_id = ?, harvest_date = ?, image_path = ?, 
+          category = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
-    const paramsQuery = [name, description || null, price, unit, stock, min_order, parseInt(String(seller_id), 10), harvest_date || null, image_path || null, category || null, status || 'pre-order', parseInt(productId, 10)];
 
-    const [result] = await pool.execute(query, paramsQuery);
+    const values = [
+      name,
+      description || null,
+      numPrice,
+      unit,
+      numStock,
+      numMinOrder,
+      numSellerId,
+      harvest_date || null,
+      image_path || null,
+      category || null,
+      finalStatus,
+      id
+    ];
+
+    const [result] = await pool.execute(query, values);
 
     if ((result as any).affectedRows === 0) {
-      const checkQuery = 'SELECT id FROM products WHERE id = ?';
-      const [checkRows] = await pool.execute(checkQuery, [parseInt(productId, 10)]);
-      if ((checkRows as any[]).length === 0) {
-        return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
-      } else {
-        return NextResponse.json({ success: false, error: 'Product not found or could not be updated' }, { status: 404 });
-      }
+      return NextResponse.json({ success: false, error: 'Product not found or no changes made' }, { status: 404 });
     }
 
-    const updatedProduct: Product = {
-      id: parseInt(productId, 10),
-      name,
-      description: description || null,
-      price,
-      unit,
-      stock,
-      min_order,
-      seller_id: parseInt(String(seller_id), 10), // Konversi ke number
-      harvest_date: harvest_date || null,
-      image_path: image_path || null,
-      category: category || null,
-      status: status || 'pre-order',
-      created_at: new Date().toISOString(), // Ambil dari DB jika ingin akurat
-      updated_at: new Date().toISOString(),
-    };
+    // Fetch updated data to return fresh state
+    const [updatedRows] = await pool.execute('SELECT * FROM products WHERE id = ?', [id]);
+    
+    return NextResponse.json({ 
+      success: true, 
+      product: formatProductResponse(updatedRows[0]) 
+    });
 
-    return NextResponse.json({ success: true, product: updatedProduct });
-
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating product (PUT):', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update product', details: (error as Error).message },
-      { status: 500 }
-    );
+    return handleAPIError(error, 'PUT /api/products/[id]');
   }
 }
 
-// PATCH: Update SEBAGIAN resource
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// ============================================================================
+// PATCH: Partial Update (Update specific fields only)
+// ============================================================================
+export async function PATCH(req: NextRequest, { params }: Params) {
   try {
-    // ✅ Await params terlebih dahulu
-    const resolvedParams = await params;
-    const productId = resolvedParams.id;
-
-    if (!/^\d+$/.test(productId)) {
-      return NextResponse.json({ success: false, error: 'Invalid product ID format. Must be numeric.' }, { status: 400 });
+    const { id } = await params;
+    if (!isValidId(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid product ID' }, { status: 400 });
     }
 
-    const body: PartialProductUpdate = await req.json();
-
-    // ✅ Ganti validasi UUID seller_id dengan validasi numerik
-    if (body.seller_id !== undefined && !/^\d+$/.test(String(body.seller_id))) {
-      return NextResponse.json({ success: false, error: 'Invalid seller_id format. Must be numeric.' }, { status: 400 });
-    }
-
-    if (body.status) {
-      const allowedStatuses: Array<'pre-order' | 'ready_stock' | 'sold_out' | 'deleted'> = ['pre-order', 'ready_stock', 'sold_out', 'deleted'];
-      if (!allowedStatuses.includes(body.status)) {
-        return NextResponse.json({ success: false, error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }, { status: 400 });
-      }
-    }
-
-    if (body.price !== undefined && body.price < 0) {
-      return NextResponse.json({ success: false, error: 'Price must be non-negative' }, { status: 400 });
-    }
-    if (body.stock !== undefined && body.stock < 0) {
-      return NextResponse.json({ success: false, error: 'Stock must be non-negative' }, { status: 400 });
-    }
-    if (body.min_order !== undefined && body.min_order < 1) {
-      return NextResponse.json({ success: false, error: 'Min order must be at least 1' }, { status: 400 });
-    }
+    const body = await req.json();
+    
+    // ✅ Whitelist fields yang boleh diupdate (Security!)
+    // Mencegah user iseng update 'id' atau 'created_at'
+    const allowedFields = [
+      'name', 'description', 'price', 'unit', 'stock', 
+      'min_order', 'seller_id', 'harvest_date', 'image_path', 
+      'category', 'status'
+    ];
 
     const updateFields: string[] = [];
-    const paramsQuery: any[] = [];
+    const values: any[] = [];
 
-    Object.entries(body).forEach(([key, value]) => {
-      if (value !== undefined) {
+    Object.keys(body).forEach((key) => {
+      if (allowedFields.includes(key) && body[key] !== undefined) {
         updateFields.push(`${key} = ?`);
-        if (key === 'seller_id') {
-             paramsQuery.push(parseInt(String(value), 10));
-        } else {
-             paramsQuery.push(value);
-        }
+        
+        // Konversi tipe data khusus
+        if (key === 'price') values.push(Number(body[key]));
+        else if (key === 'stock') values.push(Number(body[key]));
+        else if (key === 'min_order') values.push(Number(body[key]));
+        else if (key === 'seller_id') values.push(Number(body[key]));
+        else values.push(body[key]);
       }
     });
 
     if (updateFields.length === 0) {
-      return NextResponse.json({ success: false, error: 'No fields to update provided' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'No valid fields to update' }, { status: 400 });
     }
 
+    // Tambah updated_at otomatis
     updateFields.push('updated_at = CURRENT_TIMESTAMP');
-    paramsQuery.push(parseInt(productId, 10));
+    values.push(id); // Untuk WHERE clause
 
-    const query = `UPDATE products SET ${updateFields.join(', ')} WHERE id = ? AND status != ?`;
-    paramsQuery.push('deleted');
-
-    const [result] = await pool.execute(query, paramsQuery);
+    const query = `UPDATE products SET ${updateFields.join(', ')} WHERE id = ? AND status != 'deleted'`;
+    
+    const [result] = await pool.execute(query, values);
 
     if ((result as any).affectedRows === 0) {
-      const checkQuery = 'SELECT id FROM products WHERE id = ?';
-      const [checkRows] = await pool.execute(checkQuery, [parseInt(productId, 10)]);
-      if ((checkRows as any[]).length === 0) {
-        return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
-      } else {
-        return NextResponse.json({ success: false, error: 'Product not found or could not be updated' }, { status: 404 });
-      }
+      return NextResponse.json({ success: false, error: 'Product not found or already deleted' }, { status: 404 });
     }
 
-    const [updatedRows] = await pool.execute(
-      'SELECT id, name, description, price, unit, stock, min_order, seller_id, harvest_date, image_path, category, status, created_at, updated_at FROM products WHERE id = ?',
-      [parseInt(productId, 10)]
-    );
+    // Fetch fresh data
+    const [updatedRows] = await pool.execute('SELECT * FROM products WHERE id = ?', [id]);
 
-    if ((updatedRows as any[]).length === 0) {
-      return NextResponse.json({ success: false, error: 'Product not found after update' }, { status: 500 });
-    }
+    return NextResponse.json({ 
+      success: true, 
+      product: formatProductResponse(updatedRows[0]) 
+    });
 
-    const updatedProduct = (updatedRows as any[])[0];
-    updatedProduct.created_at = updatedProduct.created_at ? new Date(updatedProduct.created_at).toISOString() : null;
-    updatedProduct.updated_at = updatedProduct.updated_at ? new Date(updatedProduct.updated_at).toISOString() : null;
-    updatedProduct.harvest_date = updatedProduct.harvest_date ? new Date(updatedProduct.harvest_date).toISOString().split('T')[0] : null;
-
-    return NextResponse.json({ success: true, product: updatedProduct });
-
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating product (PATCH):', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update product', details: (error as Error).message },
-      { status: 500 }
-    );
+    return handleAPIError(error, 'PATCH /api/products/[id]');
   }
 }
 
-
-// DELETE: Hapus produk (soft delete)
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) { // Tipe params sekarang Promise
+// ============================================================================
+// DELETE: Soft Delete (Change status to 'deleted')
+// ============================================================================
+export async function DELETE(req: NextRequest, { params }: Params) {
   try {
-    // ✅ Await params terlebih dahulu
-    const resolvedParams = await params;
-    const productId = resolvedParams.id;
-
-    // Validasi ID produk
-    if (!productId) {
-      throw new Error('Product ID is missing');
+    const { id } = await params;
+    if (!isValidId(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid product ID' }, { status: 400 });
     }
 
-    if (!/^\d+$/.test(productId)) {
-      throw new Error('Invalid product ID format. Must be numeric.');
-    }
-
-    const query = 'UPDATE products SET status = ? WHERE id = ?';
-    const [result] = await pool.execute(query, ['deleted', parseInt(productId, 10)]);
+    // Soft delete: Ubah status jadi 'deleted'
+    const query = 'UPDATE products SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+    const [result] = await pool.execute(query, ['deleted', id]);
 
     if ((result as any).affectedRows === 0) {
-      const checkQuery = 'SELECT id FROM products WHERE id = ?';
-      const [checkRows] = await pool.execute(checkQuery, [parseInt(productId, 10)]);
-      if ((checkRows as any[]).length === 0) {
-        throw new Error('Product not found');
-      } else {
-        throw new Error('Product already deleted or could not be deleted');
-      }
+      return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true, message: 'Product deleted successfully' });
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Product deleted successfully' 
+    });
 
   } catch (error: any) {
-    console.error('Error deleting product (DELETE):', error);
-    return handleAPIError(error, 'DELETE /api/products/[id]'); // ✅ Gunakan middleware
+    console.error('Error deleting product:', error);
+    return handleAPIError(error, 'DELETE /api/products/[id]');
   }
 }

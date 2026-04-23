@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import pool from '@/lib/db';
 import { handleAPIError } from '@/lib/middleware';
+import { keysToCamelCase } from '@/lib/utils'; // ✅ Import helper mapping
 
 type Params = {
   params: Promise<{
@@ -49,7 +50,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     const body = await req.json();
 
-    // ✅ Validasi required fields (CODE format dari frontend)
+    // ✅ Validasi required fields (Frontend mengirim camelCase)
     const requiredFields = [
       'villageCode', 'province', 'city', 'district',
       'detail', 'zipCode', 'recipientName', 'recipientPhone'
@@ -65,7 +66,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       }
     }
 
-    // ✅ Validasi villageCode (10 digit untuk API ongkir)
+    // ✅ Validasi format
     if (!validateVillageCode(body.villageCode)) {
       return NextResponse.json(
         { success: false, error: 'Kode desa tidak valid. Harus 10 digit angka.' },
@@ -73,29 +74,18 @@ export async function PUT(req: NextRequest, { params }: Params) {
       );
     }
 
-    // ✅ Validasi location codes (2-8 digit)
-    if (!validateLocationCode(body.province)) {
+    if (!validateLocationCode(body.province) || 
+        !validateLocationCode(body.city) || 
+        !validateLocationCode(body.district)) {
       return NextResponse.json(
-        { success: false, error: 'Kode provinsi tidak valid.' },
-        { status: 400 }
-      );
-    }
-    if (!validateLocationCode(body.city)) {
-      return NextResponse.json(
-        { success: false, error: 'Kode kota tidak valid.' },
-        { status: 400 }
-      );
-    }
-    if (!validateLocationCode(body.district)) {
-      return NextResponse.json(
-        { success: false, error: 'Kode kecamatan tidak valid.' },
+        { success: false, error: 'Kode lokasi tidak valid.' },
         { status: 400 }
       );
     }
 
-    // ✅ Verifikasi kepemilikan alamat (pakai addressId dari URL)
+    // ✅ Verifikasi kepemilikan (Snake_case: user_id, deleted_at)
     const [checkRows] = await pool.execute(
-      'SELECT id FROM address WHERE id = ? AND userId = ?',
+      'SELECT id FROM address WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
       [addressId, userId]
     );
 
@@ -106,27 +96,27 @@ export async function PUT(req: NextRequest, { params }: Params) {
       );
     }
 
-    // ✅ Update dengan CODE format (pakai addressId dari URL)
+    // ✅ Update menggunakan SNAKE_CASE
     const [result] = await pool.execute(
       `UPDATE address SET 
-        villageCode = ?, 
+        village_code = ?, 
         province = ?, city = ?, district = ?, 
-        detail = ?, zipCode = ?, 
-        recipientName = ?, recipientPhone = ?, 
-        isDefault = ?, 
-        updatedAt = CURRENT_TIMESTAMP 
-      WHERE id = ? AND userId = ?`,
+        detail = ?, zip_code = ?, 
+        recipient_name = ?, recipient_phone = ?, 
+        is_default = ?, 
+        updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ? AND user_id = ?`,
       [
-        body.villageCode?.trim() ?? '',
-        body.province?.trim() ?? '',
-        body.city?.trim() ?? '',
-        body.district?.trim() ?? '',
-        body.detail?.trim() ?? '',
-        body.zipCode?.trim() ?? '',
-        body.recipientName?.trim() ?? '',
-        body.recipientPhone?.trim() ?? '',
+        body.villageCode?.trim(),
+        body.province?.trim(),
+        body.city?.trim(),
+        body.district?.trim(),
+        body.detail?.trim(),
+        body.zipCode?.trim(),
+        body.recipientName?.trim(),
+        body.recipientPhone?.trim(),
         body.isDefault || false,
-        addressId,  // ✅ Pakai ID dari URL params
+        addressId,
         userId
       ]
     );
@@ -138,30 +128,31 @@ export async function PUT(req: NextRequest, { params }: Params) {
       );
     }
 
-    // ✅ Ambil data yang diupdate
+    // ✅ Ambil data update & convert ke camelCase
     const [updatedRows] = await pool.execute(
       `SELECT 
-        id, userId, detail, villageCode, 
+        id, user_id, detail, village_code, 
         province, city, district, 
-        zipCode, recipientName, recipientPhone, 
-        isDefault, createdAt, updatedAt 
+        zip_code, recipient_name, recipient_phone, 
+        is_default, created_at, updated_at 
       FROM address WHERE id = ?`,
       [addressId]
     );
 
+    const address = keysToCamelCase(updatedRows)[0];
+
     return NextResponse.json({
       success: true,
-      address: Array.isArray(updatedRows) && updatedRows.length > 0 ? updatedRows[0] : null,
+      address: address || null,
       message: 'Alamat berhasil diperbarui'
     });
 
   } catch (err: any) {
-    console.error('Error updating address:', err);
     return handleAPIError(err, 'PUT /api/address/[id]');
   }
 }
 
-// ✅ DELETE: Delete address
+// ✅ DELETE: Soft Delete Address dengan Cek Riwayat Pesanan
 export async function DELETE(req: NextRequest, { params }: Params) {
   try {
     const authHeader = req.headers.get('Authorization');
@@ -188,27 +179,46 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       );
     }
 
-    // ✅ Verifikasi kepemilikan
+    // ✅ 1. Verifikasi kepemilikan & belum dihapus
     const [checkRows] = await pool.execute(
-      'SELECT id FROM address WHERE id = ? AND userId = ?',
+      'SELECT id FROM address WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
       [addressId, userId]
     );
 
     if ((checkRows as any[]).length === 0) {
       return NextResponse.json(
-        { success: false, error: 'Address not found or does not belong to user.' },
+        { success: false, error: 'Alamat tidak ditemukan atau sudah dihapus.' },
         { status: 404 }
       );
     }
 
+    // ✅ 2. Cek penggunaan di Orders (Snake_case: address_id)
+    // Pastikan kolom foreign key di tabel orders bernama 'address_id'
+    const [orderRefs] = await pool.execute(
+      'SELECT id FROM orders WHERE address_id = ? LIMIT 1',
+      [addressId]
+    );
+
+    if ((orderRefs as any[]).length > 0) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Alamat tidak dapat dihapus karena masih digunakan dalam riwayat pesanan.',
+          code: 'ADDRESS_IN_USE'
+        },
+        { status: 400 }
+      );
+    }
+
+    // ✅ 3. Soft Delete (Update deleted_at)
     const [result] = await pool.execute(
-      'DELETE FROM address WHERE id = ? AND userId = ?',
+      'UPDATE address SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
       [addressId, userId]
     );
 
     if ((result as any).affectedRows === 0) {
       return NextResponse.json(
-        { success: false, error: 'Address not found or could not be deleted.' },
+        { success: false, error: 'Gagal menghapus alamat.' },
         { status: 404 }
       );
     }
@@ -219,7 +229,6 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     });
 
   } catch (err: any) {
-    console.error('Error deleting address:', err);
     return handleAPIError(err, 'DELETE /api/address/[id]');
   }
 }

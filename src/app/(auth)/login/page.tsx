@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';  
 import { useRouter } from 'next/navigation';
 import { Leaf, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -23,9 +24,11 @@ export default function LoginPage() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get('callbackUrl') || '/akun';
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
@@ -68,12 +71,17 @@ export default function LoginPage() {
         phone: data.user?.phone || null,
       };
 
+      // Simpan Token & Data User
       setCookie('accessToken', token, 7);
       localStorage.setItem('accessToken', token);
       localStorage.setItem('user', JSON.stringify(userData));
 
+      // Update Context Auth
       login(token, userData);
       
+      // ✅ REDIRECT KE HALAMAN AKUN SETELAH LOGIN SUKSES
+      router.push('/katalog'); 
+
     } catch (err: any) {
       console.error('Login error:', err);
       setError(err.message);

@@ -1,0 +1,1008 @@
+-- phpMyAdmin SQL Dump
+-- version 5.2.1
+-- https://www.phpmyadmin.net/
+--
+-- Host: 127.0.0.1
+-- Waktu pembuatan: 22 Apr 2026 pada 02.02
+-- Versi server: 10.4.32-MariaDB
+-- Versi PHP: 8.2.12
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+
+--
+-- Database: `ecommerce_db`
+--
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `address`
+--
+
+CREATE TABLE `address` (
+  `id` int(11) NOT NULL,
+  `userId` int(11) NOT NULL,
+  `detail` text NOT NULL,
+  `city` varchar(10) NOT NULL,
+  `district` varchar(10) DEFAULT NULL,
+  `villageCode` varchar(20) DEFAULT NULL,
+  `province` varchar(100) NOT NULL,
+  `zipCode` varchar(10) NOT NULL,
+  `recipientName` varchar(100) DEFAULT NULL COMMENT 'Nama penerima',
+  `recipientPhone` varchar(20) DEFAULT NULL COMMENT 'No HP penerima',
+  `isDefault` tinyint(1) DEFAULT 0 COMMENT 'Alamat utama',
+  `createdAt` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updatedAt` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  `deletedAt` timestamp NULL DEFAULT NULL COMMENT 'Timestamp saat alamat di-soft-delete'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Struktur dari tabel `cartitems`
+--
+
+CREATE TABLE `cartitems` (
+  `id` int(11) NOT NULL,
+  `userId` int(11) NOT NULL,
+  `productId` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL,
+  `createdAt` datetime DEFAULT NULL,
+  `updatedAt` datetime DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `category`
+--
+
+CREATE TABLE `category` (
+  `id` int(11) NOT NULL,
+  `name` varchar(191) NOT NULL,
+  `slug` varchar(255) DEFAULT NULL COMMENT 'Slug URL untuk kategori (unik)',
+  `description_category` varchar(50) NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1 = aktif, 0 = tidak aktif',
+  `display_order` int(11) NOT NULL DEFAULT 0 COMMENT 'Urutan tampil di frontend',
+  `icon` varchar(50) DEFAULT NULL COMMENT 'Nama icon Lucide',
+  `color` varchar(30) DEFAULT NULL COMMENT 'Class warna Tailwind'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+
+--
+-- Struktur dari tabel `districts`
+--
+
+CREATE TABLE `districts` (
+  `id` varchar(10) NOT NULL,
+  `regency_id` varchar(10) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `regency_name` varchar(255) NOT NULL,
+  `province_code` varchar(10) NOT NULL,
+  `province_name` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Struktur dari tabel `forum_categories`
+--
+
+CREATE TABLE `forum_categories` (
+  `id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL COMMENT 'Nama kategori (ex: Diskusi Umum, Tips Bertani)',
+  `slug` varchar(100) NOT NULL COMMENT 'Slug untuk URL (ex: diskusi-umum)',
+  `description` text DEFAULT NULL COMMENT 'Deskripsi kategori',
+  `icon` varchar(100) DEFAULT NULL COMMENT 'Icon kategori (emoji atau class icon)',
+  `post_count` int(11) DEFAULT 0 COMMENT 'Jumlah post aktif di kategori ini',
+  `color` varchar(20) DEFAULT '#3B82F6' COMMENT 'Warna badge kategori',
+  `sort_order` int(11) DEFAULT 0 COMMENT 'Urutan tampil di UI',
+  `is_active` tinyint(1) DEFAULT 1 COMMENT 'Aktif/tidak',
+  `created_at` datetime(3) DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+--
+-- Struktur dari tabel `forum_comments`
+--
+
+CREATE TABLE `forum_comments` (
+  `id` int(11) NOT NULL,
+  `post_id` int(11) NOT NULL COMMENT 'ID post yang dikomentari',
+  `user_id` int(11) NOT NULL COMMENT 'ID user yang komentar',
+  `parent_id` int(11) DEFAULT NULL COMMENT 'ID parent comment (untuk reply/threaded)',
+  `content` text NOT NULL COMMENT 'Isi komentar',
+  `likes` int(11) DEFAULT 0 COMMENT 'Jumlah like komentar',
+  `status` enum('approved','pending','rejected') DEFAULT 'approved',
+  `is_deleted` tinyint(1) DEFAULT 0 COMMENT 'Soft delete',
+  `created_at` datetime(3) DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+
+--
+-- Struktur dari tabel `forum_likes`
+--
+
+CREATE TABLE `forum_likes` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `post_id` int(11) DEFAULT NULL COMMENT 'Like ke post',
+  `comment_id` int(11) DEFAULT NULL COMMENT 'Like ke komentar',
+  `created_at` datetime(3) DEFAULT current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+
+--
+-- Struktur dari tabel `forum_posts`
+--
+
+CREATE TABLE `forum_posts` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL COMMENT 'ID user yang membuat post',
+  `category_id` int(11) NOT NULL COMMENT 'ID kategori',
+  `title` varchar(255) NOT NULL COMMENT 'Judul post',
+  `content` text NOT NULL COMMENT 'Konten post (markdown/HTML)',
+  `image_url` varchar(500) DEFAULT NULL COMMENT 'URL gambar dari Google/external source',
+  `image_alt` varchar(255) DEFAULT NULL COMMENT 'Alt text untuk aksesibilitas',
+  `image_source` varchar(100) DEFAULT NULL COMMENT 'Sumber gambar: google, unsplash, upload, dll',
+  `status` enum('draft','pending','approved','rejected','archived') DEFAULT 'pending' COMMENT 'Status moderasi',
+  `admin_note` text DEFAULT NULL COMMENT 'Catatan admin untuk post yang direject',
+  `views` int(11) DEFAULT 0 COMMENT 'Jumlah view',
+  `likes` int(11) DEFAULT 0 COMMENT 'Jumlah like (denormalized)',
+  `comments_count` int(11) DEFAULT 0 COMMENT 'Jumlah komentar (denormalized)',
+  `is_pinned` tinyint(1) DEFAULT 0 COMMENT 'Pin post di atas',
+  `is_locked` tinyint(1) DEFAULT 0 COMMENT 'Lock post (tidak bisa komentar)',
+  `is_deleted` tinyint(1) DEFAULT 0 COMMENT 'Soft delete',
+  `created_at` datetime(3) DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Trigger `forum_posts`
+--
+DELIMITER $$
+CREATE TRIGGER `update_category_post_count_delete` BEFORE DELETE ON `forum_posts` FOR EACH ROW BEGIN
+  IF OLD.status = 'approved' AND OLD.is_deleted = FALSE THEN
+    UPDATE forum_categories 
+    SET post_count = post_count - 1 
+    WHERE id = OLD.category_id;
+  END IF;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `update_category_post_count_insert` AFTER INSERT ON `forum_posts` FOR EACH ROW BEGIN
+  IF NEW.status = 'approved' AND NEW.is_deleted = FALSE THEN
+    UPDATE forum_categories 
+    SET post_count = post_count + 1 
+    WHERE id = NEW.category_id;
+  END IF;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `update_category_post_count_update` AFTER UPDATE ON `forum_posts` FOR EACH ROW BEGIN
+  -- Jika status berubah dari non-approved ke approved
+  IF OLD.status != 'approved' AND NEW.status = 'approved' AND NEW.is_deleted = FALSE THEN
+    UPDATE forum_categories 
+    SET post_count = post_count + 1 
+    WHERE id = NEW.category_id;
+  END IF;
+  
+  -- Jika status berubah dari approved ke non-approved
+  IF OLD.status = 'approved' AND (NEW.status != 'approved' OR NEW.is_deleted = TRUE) THEN
+    UPDATE forum_categories 
+    SET post_count = post_count - 1 
+    WHERE id = NEW.category_id;
+  END IF;
+END
+$$
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `forum_post_images`
+--
+
+CREATE TABLE `forum_post_images` (
+  `id` int(11) NOT NULL,
+  `post_id` int(11) NOT NULL COMMENT 'ID post yang memiliki gambar',
+  `image_url` varchar(500) NOT NULL COMMENT 'URL gambar dari Google/external/upload',
+  `image_alt` varchar(255) DEFAULT NULL COMMENT 'Alt text untuk aksesibilitas',
+  `image_source` varchar(50) DEFAULT 'google' COMMENT 'Sumber: google, unsplash, upload, dll',
+  `file_size` int(11) DEFAULT NULL COMMENT 'Ukuran file dalam bytes (untuk uploaded images)',
+  `mime_type` varchar(50) DEFAULT NULL COMMENT 'MIME type: image/jpeg, image/png',
+  `display_order` int(11) DEFAULT 0 COMMENT 'Urutan tampilan (0-4, max 5 gambar)',
+  `is_primary` tinyint(1) DEFAULT 0 COMMENT 'Gambar utama/poster',
+  `created_at` datetime(3) DEFAULT current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Trigger `forum_post_images`
+--
+DELIMITER $$
+CREATE TRIGGER `check_max_post_images` BEFORE INSERT ON `forum_post_images` FOR EACH ROW BEGIN
+  DECLARE img_count INT;
+  SELECT COUNT(*) INTO img_count 
+  FROM forum_post_images 
+  WHERE post_id = NEW.post_id;
+  
+  IF img_count >= 5 THEN
+    SIGNAL SQLSTATE '45000' 
+    SET MESSAGE_TEXT = 'Maksimal 5 gambar per post';
+  END IF;
+END
+$$
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `forum_post_tags`
+--
+
+CREATE TABLE `forum_post_tags` (
+  `post_id` int(11) NOT NULL,
+  `tag_id` int(11) NOT NULL,
+  `created_at` datetime(3) DEFAULT current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `forum_tags`
+--
+
+CREATE TABLE `forum_tags` (
+  `id` int(11) NOT NULL,
+  `name` varchar(50) NOT NULL COMMENT 'Nama tag (ex: #tips-panen)',
+  `slug` varchar(50) NOT NULL COMMENT 'Slug untuk URL',
+  `color` varchar(20) DEFAULT '#6B7280' COMMENT 'Warna badge tag',
+  `created_at` datetime(3) DEFAULT current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `notifications`
+--
+
+CREATE TABLE `notifications` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `sender_id` int(11) DEFAULT NULL,
+  `title` varchar(255) NOT NULL,
+  `message` text NOT NULL,
+  `type` enum('order','payment','forum','system','promo') NOT NULL,
+  `action_type` varchar(50) DEFAULT NULL COMMENT 'Jenis action: forum_reply, forum_like, order_shipped, dll',
+  `reference_id` varchar(100) DEFAULT NULL COMMENT 'ID referensi: post_id, order_id, dll',
+  `reading` tinyint(1) DEFAULT 0 COMMENT 'Status: sudah dibaca atau belum',
+  `link` varchar(500) DEFAULT NULL,
+  `image_url` varchar(500) DEFAULT NULL,
+  `is_deleted` tinyint(1) DEFAULT 0,
+  `created_at` datetime(3) DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Struktur dari tabel `notification_templates`
+--
+
+CREATE TABLE `notification_templates` (
+  `id` int(11) NOT NULL,
+  `code` varchar(50) NOT NULL COMMENT 'Kode template: order_created, forum_reply, dll',
+  `type` enum('order','payment','forum','system','promo') NOT NULL,
+  `title_template` varchar(255) NOT NULL COMMENT 'Template judul dengan placeholder: {{order_id}}',
+  `message_template` text NOT NULL COMMENT 'Template pesan dengan placeholder',
+  `link_pattern` varchar(500) DEFAULT NULL COMMENT 'Pattern link: /orders/{{order_id}}',
+  `is_active` tinyint(1) DEFAULT 1,
+  `created_at` datetime(3) DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+
+--
+-- Struktur dari tabel `orderlog`
+--
+
+CREATE TABLE `orderlog` (
+  `id` int(11) NOT NULL,
+  `ordersId` int(11) NOT NULL,
+  `status` varchar(50) NOT NULL,
+  `message` varchar(191) NOT NULL,
+  `updatedBy` int(11) NOT NULL,
+  `createdAt` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updatedAt` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `orders`
+--
+
+CREATE TABLE `orders` (
+  `id` int(11) NOT NULL,
+  `userId` int(11) NOT NULL,
+  `addressId` int(11) NOT NULL,
+  `orderId` varchar(50) DEFAULT NULL,
+  `status` enum('pending','paid','shipped','delivered','cancelled') NOT NULL DEFAULT 'pending',
+  `paymentStatus` enum('unpaid','paid','failed','refunded') NOT NULL DEFAULT 'unpaid',
+  `paymentMethod` varchar(50) NOT NULL,
+  `paymentUrl` varchar(500) DEFAULT NULL,
+  `payment_url_full` text DEFAULT NULL,
+  `snap_token` varchar(100) DEFAULT NULL,
+  `paymentGateway` varchar(50) DEFAULT NULL,
+  `vaNumber` varchar(100) DEFAULT NULL,
+  `bank_name` varchar(20) DEFAULT NULL,
+  `paymentDeadline` datetime DEFAULT NULL,
+  `payment_deadline` datetime(3) DEFAULT NULL,
+  `paid_at` datetime(3) DEFAULT NULL,
+  `totalProductPrice` int(11) NOT NULL DEFAULT 0,
+  `shippingCost` int(11) NOT NULL DEFAULT 0,
+  `paymentFee` int(11) NOT NULL DEFAULT 0,
+  `grandTotal` int(11) NOT NULL DEFAULT 0,
+  `createdAt` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updatedAt` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  `is_pre_order` tinyint(1) NOT NULL DEFAULT 0,
+  `estimated_ship_date` date DEFAULT NULL,
+  `po_status` enum('waiting_harvest','harvesting','ready_to_ship','shipped') DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `order_items`
+--
+
+CREATE TABLE `order_items` (
+  `id` int(11) NOT NULL,
+  `orderId` int(11) NOT NULL,
+  `productId` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL DEFAULT 1,
+  `price` int(11) NOT NULL DEFAULT 0,
+  `subtotal` int(11) NOT NULL DEFAULT 0,
+  `createdAt` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updatedAt` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  `priceAtOrder` decimal(10,2) NOT NULL COMMENT 'Harga produk saat order dibuat (snapshot price)'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `payment`
+--
+
+CREATE TABLE `payment` (
+  `id` int(11) NOT NULL,
+  `ordersId` int(11) NOT NULL,
+  `method` varchar(191) NOT NULL,
+  `payment_method` varchar(50) DEFAULT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `paymentFee` int(11) NOT NULL DEFAULT 0,
+  `status` varchar(50) NOT NULL,
+  `fraud_status` varchar(20) DEFAULT NULL,
+  `transaction_id` varchar(100) NOT NULL,
+  `signature_key` varchar(255) DEFAULT NULL,
+  `paymentType` varchar(50) DEFAULT NULL,
+  `vaNumber` varchar(50) DEFAULT NULL,
+  `bank_name` varchar(20) DEFAULT NULL,
+  `payment_action` varchar(50) DEFAULT NULL,
+  `paymentDeadline` datetime DEFAULT NULL,
+  `payment_time` datetime(3) DEFAULT NULL,
+  `createdAt` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updatedAt` datetime(3) DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `payment_logs`
+--
+
+CREATE TABLE `payment_logs` (
+  `id` int(11) NOT NULL,
+  `payment_id` int(11) NOT NULL,
+  `event_type` enum('created','pending','success','failed','expired','cancelled','refund') NOT NULL,
+  `event_data` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`event_data`)),
+  `signature_verified` tinyint(1) DEFAULT 0,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` text DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `products`
+--
+
+CREATE TABLE `products` (
+  `id` int(11) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `description` text DEFAULT NULL,
+  `price` decimal(10,2) NOT NULL,
+  `unit` varchar(10) NOT NULL,
+  `stock` int(11) NOT NULL DEFAULT 0,
+  `sold_count` int(11) NOT NULL DEFAULT 0,
+  `origin_village_code` varchar(20) DEFAULT NULL,
+  `min_order` int(11) NOT NULL DEFAULT 1,
+  `seller_id` int(11) NOT NULL,
+  `harvest_date` date DEFAULT NULL,
+  `image_path` varchar(255) DEFAULT NULL,
+  `category` varchar(100) DEFAULT NULL,
+  `status` enum('ready_stock','pre-order','sold_out','deleted') NOT NULL DEFAULT 'ready_stock',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `po_quota` int(11) DEFAULT NULL COMMENT 'Kuota maksimal yang bisa dipesan via Pre-Order (kg/satuan)',
+  `po_sold` int(11) NOT NULL DEFAULT 0 COMMENT 'Jumlah yang sudah terjual via Pre-Order',
+  `category_id` int(11) DEFAULT NULL COMMENT 'Foreign key ke tabel category'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+
+--
+-- Struktur dari tabel `provinces`
+--
+
+CREATE TABLE `provinces` (
+  `id` varchar(10) NOT NULL,
+  `name` varchar(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Struktur dari tabel `reviews`
+--
+
+CREATE TABLE `reviews` (
+  `id` int(11) NOT NULL,
+  `userId` int(11) NOT NULL,
+  `productId` int(11) NOT NULL,
+  `orderId` int(11) DEFAULT NULL,
+  `rating` int(11) NOT NULL CHECK (`rating` >= 1 and `rating` <= 5),
+  `comment` text DEFAULT NULL,
+  `is_verified` tinyint(1) NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `users`
+--
+
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `avatar` varchar(255) DEFAULT NULL COMMENT 'URL foto profil user',
+  `password` varchar(255) NOT NULL,
+  `role` enum('buyer','seller','admin') NOT NULL DEFAULT 'buyer',
+  `reset_token` text DEFAULT NULL,
+  `reset_expires` datetime DEFAULT NULL,
+  `refresh_token` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Struktur dari tabel `user_sessions`
+--
+
+CREATE TABLE `user_sessions` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `refresh_token_hash` varchar(64) NOT NULL,
+  `user_agent` text DEFAULT NULL,
+  `device_type` varchar(20) NOT NULL,
+  `browser` varchar(20) NOT NULL,
+  `accessed_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+--
+-- Struktur dari tabel `villages`
+--
+
+CREATE TABLE `villages` (
+  `id` varchar(20) NOT NULL,
+  `district_id` varchar(10) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `regency_id` varchar(10) NOT NULL,
+  `province_id` varchar(10) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+
+-- Indexes for dumped tables
+--
+
+--
+-- Indeks untuk tabel `address`
+--
+ALTER TABLE `address`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `address_userId_idx` (`userId`),
+  ADD KEY `idx_userId` (`userId`),
+  ADD KEY `idx_villageCode` (`villageCode`),
+  ADD KEY `idx_isDefault` (`isDefault`),
+  ADD KEY `idx_deletedAt` (`deletedAt`);
+
+--
+-- Indeks untuk tabel `cartitems`
+--
+ALTER TABLE `cartitems`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `fk_cartitems_users` (`userId`),
+  ADD KEY `fk_cartitems_products` (`productId`);
+
+--
+-- Indeks untuk tabel `category`
+--
+ALTER TABLE `category`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `idx_slug` (`slug`),
+  ADD KEY `idx_is_active` (`is_active`),
+  ADD KEY `idx_display_order` (`display_order`);
+
+--
+-- Indeks untuk tabel `districts`
+--
+ALTER TABLE `districts`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `districts_regency_id_idx` (`regency_id`),
+  ADD KEY `districts_province_code_idx` (`province_code`);
+
+--
+-- Indeks untuk tabel `forum_categories`
+--
+ALTER TABLE `forum_categories`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `slug` (`slug`),
+  ADD KEY `idx_slug` (`slug`),
+  ADD KEY `idx_sort` (`sort_order`,`is_active`),
+  ADD KEY `idx_post_count` (`post_count`);
+
+--
+-- Indeks untuk tabel `forum_comments`
+--
+ALTER TABLE `forum_comments`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_post` (`post_id`,`created_at`),
+  ADD KEY `idx_user` (`user_id`),
+  ADD KEY `idx_parent` (`parent_id`),
+  ADD KEY `idx_status` (`status`,`is_deleted`);
+
+--
+-- Indeks untuk tabel `forum_likes`
+--
+ALTER TABLE `forum_likes`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uniq_user_post` (`user_id`,`post_id`),
+  ADD UNIQUE KEY `uniq_user_comment` (`user_id`,`comment_id`),
+  ADD KEY `idx_post_likes` (`post_id`),
+  ADD KEY `idx_comment_likes` (`comment_id`);
+
+--
+-- Indeks untuk tabel `forum_posts`
+--
+ALTER TABLE `forum_posts`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_user` (`user_id`),
+  ADD KEY `idx_category` (`category_id`),
+  ADD KEY `idx_status` (`status`,`is_deleted`),
+  ADD KEY `idx_created` (`created_at`),
+  ADD KEY `idx_pinned` (`is_pinned`,`created_at`),
+  ADD KEY `idx_category_status` (`category_id`,`status`,`is_deleted`);
+ALTER TABLE `forum_posts` ADD FULLTEXT KEY `idx_search` (`title`,`content`);
+
+--
+-- Indeks untuk tabel `forum_post_images`
+--
+ALTER TABLE `forum_post_images`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_post` (`post_id`,`display_order`),
+  ADD KEY `idx_primary` (`post_id`,`is_primary`);
+
+--
+-- Indeks untuk tabel `forum_post_tags`
+--
+ALTER TABLE `forum_post_tags`
+  ADD PRIMARY KEY (`post_id`,`tag_id`),
+  ADD KEY `idx_tag` (`tag_id`);
+
+--
+-- Indeks untuk tabel `forum_tags`
+--
+ALTER TABLE `forum_tags`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `name` (`name`),
+  ADD UNIQUE KEY `slug` (`slug`),
+  ADD KEY `idx_slug` (`slug`);
+
+--
+-- Indeks untuk tabel `notifications`
+--
+ALTER TABLE `notifications`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `sender_id` (`sender_id`),
+  ADD KEY `idx_user` (`user_id`,`created_at`),
+  ADD KEY `idx_reading` (`user_id`,`reading`),
+  ADD KEY `idx_action_type` (`user_id`,`action_type`),
+  ADD KEY `idx_reference` (`user_id`,`reference_id`);
+
+--
+-- Indeks untuk tabel `notification_templates`
+--
+ALTER TABLE `notification_templates`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `code` (`code`),
+  ADD KEY `idx_code` (`code`),
+  ADD KEY `idx_type` (`type`);
+
+--
+-- Indeks untuk tabel `orderlog`
+--
+ALTER TABLE `orderlog`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `OrderLog_orderId_fkey` (`ordersId`),
+  ADD KEY `OrderLog_updatedBy_fkey` (`updatedBy`);
+
+--
+-- Indeks untuk tabel `orders`
+--
+ALTER TABLE `orders`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uk_orderId` (`orderId`),
+  ADD KEY `idx_orders_user` (`userId`),
+  ADD KEY `idx_orders_status` (`status`,`paymentStatus`),
+  ADD KEY `idx_orders_payment_deadline` (`payment_deadline`),
+  ADD KEY `idx_orders_orderId` (`orderId`),
+  ADD KEY `idx_orders_address` (`addressId`);
+
+--
+-- Indeks untuk tabel `order_items`
+--
+ALTER TABLE `order_items`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_order` (`orderId`),
+  ADD KEY `idx_product` (`productId`);
+
+--
+-- Indeks untuk tabel `payment`
+--
+ALTER TABLE `payment`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_payment_order` (`ordersId`),
+  ADD KEY `idx_payment_status` (`status`,`payment_method`),
+  ADD KEY `idx_payment_transaction` (`transaction_id`),
+  ADD KEY `idx_payment_method` (`payment_method`,`bank_name`);
+
+--
+-- Indeks untuk tabel `payment_logs`
+--
+ALTER TABLE `payment_logs`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_payment` (`payment_id`),
+  ADD KEY `idx_event` (`event_type`,`created_at`),
+  ADD KEY `idx_created` (`created_at`);
+
+--
+-- Indeks untuk tabel `products`
+--
+ALTER TABLE `products`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_category` (`category`),
+  ADD KEY `idx_status` (`status`),
+  ADD KEY `idx_seller_id` (`seller_id`),
+  ADD KEY `idx_products_sold_count` (`sold_count`),
+  ADD KEY `idx_products_status` (`status`),
+  ADD KEY `idx_category_id` (`category_id`);
+
+--
+-- Indeks untuk tabel `provinces`
+--
+ALTER TABLE `provinces`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- Indeks untuk tabel `regencies`
+--
+ALTER TABLE `regencies`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `regencies_province_id_idx` (`province_id`);
+
+--
+-- Indeks untuk tabel `reviews`
+--
+ALTER TABLE `reviews`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `reviews_userId_idx` (`userId`),
+  ADD KEY `reviews_productId_idx` (`productId`),
+  ADD KEY `reviews_orderId_idx` (`orderId`);
+
+--
+-- Indeks untuk tabel `users`
+--
+ALTER TABLE `users`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `email` (`email`),
+  ADD KEY `idx_avatar` (`avatar`);
+
+--
+-- Indeks untuk tabel `user_sessions`
+--
+ALTER TABLE `user_sessions`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `user_id` (`user_id`);
+
+--
+-- Indeks untuk tabel `villages`
+--
+ALTER TABLE `villages`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `villages_district_id_idx` (`district_id`),
+  ADD KEY `villages_regency_id_idx` (`regency_id`),
+  ADD KEY `villages_province_id_idx` (`province_id`);
+
+--
+-- AUTO_INCREMENT untuk tabel yang dibuang
+--
+
+--
+-- AUTO_INCREMENT untuk tabel `address`
+--
+ALTER TABLE `address`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=13;
+
+--
+-- AUTO_INCREMENT untuk tabel `cartitems`
+--
+ALTER TABLE `cartitems`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT untuk tabel `category`
+--
+ALTER TABLE `category`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
+
+--
+-- AUTO_INCREMENT untuk tabel `forum_categories`
+--
+ALTER TABLE `forum_categories`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
+
+--
+-- AUTO_INCREMENT untuk tabel `forum_comments`
+--
+ALTER TABLE `forum_comments`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=24;
+
+--
+-- AUTO_INCREMENT untuk tabel `forum_likes`
+--
+ALTER TABLE `forum_likes`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=44;
+
+--
+-- AUTO_INCREMENT untuk tabel `forum_posts`
+--
+ALTER TABLE `forum_posts`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
+
+--
+-- AUTO_INCREMENT untuk tabel `forum_post_images`
+--
+ALTER TABLE `forum_post_images`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+
+--
+-- AUTO_INCREMENT untuk tabel `forum_tags`
+--
+ALTER TABLE `forum_tags`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
+
+--
+-- AUTO_INCREMENT untuk tabel `notifications`
+--
+ALTER TABLE `notifications`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
+
+--
+-- AUTO_INCREMENT untuk tabel `notification_templates`
+--
+ALTER TABLE `notification_templates`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=21;
+
+--
+-- AUTO_INCREMENT untuk tabel `orderlog`
+--
+ALTER TABLE `orderlog`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT untuk tabel `orders`
+--
+ALTER TABLE `orders`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT untuk tabel `order_items`
+--
+ALTER TABLE `order_items`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT untuk tabel `payment`
+--
+ALTER TABLE `payment`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
+
+--
+-- AUTO_INCREMENT untuk tabel `payment_logs`
+--
+ALTER TABLE `payment_logs`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT untuk tabel `products`
+--
+ALTER TABLE `products`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=21;
+
+--
+-- AUTO_INCREMENT untuk tabel `reviews`
+--
+ALTER TABLE `reviews`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT untuk tabel `users`
+--
+ALTER TABLE `users`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT untuk tabel `user_sessions`
+--
+ALTER TABLE `user_sessions`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
+
+--
+-- Ketidakleluasaan untuk tabel pelimpahan (Dumped Tables)
+--
+
+--
+-- Ketidakleluasaan untuk tabel `address`
+--
+ALTER TABLE `address`
+  ADD CONSTRAINT `Address_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `users` (`id`) ON UPDATE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `cartitems`
+--
+ALTER TABLE `cartitems`
+  ADD CONSTRAINT `fk_cartitems_products` FOREIGN KEY (`productId`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_cartitems_users` FOREIGN KEY (`userId`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `districts`
+--
+ALTER TABLE `districts`
+  ADD CONSTRAINT `District_regency_id_fkey` FOREIGN KEY (`regency_id`) REFERENCES `regencies` (`id`) ON UPDATE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `forum_comments`
+--
+ALTER TABLE `forum_comments`
+  ADD CONSTRAINT `forum_comments_ibfk_1` FOREIGN KEY (`post_id`) REFERENCES `forum_posts` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `forum_comments_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `forum_comments_ibfk_3` FOREIGN KEY (`parent_id`) REFERENCES `forum_comments` (`id`) ON DELETE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `forum_likes`
+--
+ALTER TABLE `forum_likes`
+  ADD CONSTRAINT `forum_likes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `forum_likes_ibfk_2` FOREIGN KEY (`post_id`) REFERENCES `forum_posts` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `forum_likes_ibfk_3` FOREIGN KEY (`comment_id`) REFERENCES `forum_comments` (`id`) ON DELETE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `forum_posts`
+--
+ALTER TABLE `forum_posts`
+  ADD CONSTRAINT `forum_posts_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `forum_posts_ibfk_2` FOREIGN KEY (`category_id`) REFERENCES `forum_categories` (`id`);
+
+--
+-- Ketidakleluasaan untuk tabel `forum_post_images`
+--
+ALTER TABLE `forum_post_images`
+  ADD CONSTRAINT `forum_post_images_ibfk_1` FOREIGN KEY (`post_id`) REFERENCES `forum_posts` (`id`) ON DELETE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `forum_post_tags`
+--
+ALTER TABLE `forum_post_tags`
+  ADD CONSTRAINT `forum_post_tags_ibfk_1` FOREIGN KEY (`post_id`) REFERENCES `forum_posts` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `forum_post_tags_ibfk_2` FOREIGN KEY (`tag_id`) REFERENCES `forum_tags` (`id`) ON DELETE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `notifications`
+--
+ALTER TABLE `notifications`
+  ADD CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `notifications_ibfk_2` FOREIGN KEY (`sender_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+--
+-- Ketidakleluasaan untuk tabel `orders`
+--
+ALTER TABLE `orders`
+  ADD CONSTRAINT `fk_orders_address` FOREIGN KEY (`addressId`) REFERENCES `address` (`id`),
+  ADD CONSTRAINT `fk_orders_user` FOREIGN KEY (`userId`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `order_items`
+--
+ALTER TABLE `order_items`
+  ADD CONSTRAINT `fk_order_items_order` FOREIGN KEY (`orderId`) REFERENCES `orders` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_order_items_product` FOREIGN KEY (`productId`) REFERENCES `products` (`id`);
+
+--
+-- Ketidakleluasaan untuk tabel `payment`
+--
+ALTER TABLE `payment`
+  ADD CONSTRAINT `fk_payment_orders` FOREIGN KEY (`ordersId`) REFERENCES `orders` (`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `payment_logs`
+--
+ALTER TABLE `payment_logs`
+  ADD CONSTRAINT `fk_payment_logs_payment` FOREIGN KEY (`payment_id`) REFERENCES `payment` (`id`) ON DELETE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `products`
+--
+ALTER TABLE `products`
+  ADD CONSTRAINT `fk_products_category` FOREIGN KEY (`category_id`) REFERENCES `category` (`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
