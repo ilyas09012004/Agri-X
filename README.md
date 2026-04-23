@@ -1,4 +1,4 @@
-# Agri-X - Tugas UAS Pemrograman API 
+# Agri-X - Agri-Ecommerce
  
 Aplikasi e-commerce pertanian berbasis web untuk masyarakat Kedamean, Gresik. 
  
