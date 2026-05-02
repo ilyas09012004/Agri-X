@@ -20,6 +20,7 @@ import { getCookie } from '@/lib/auth';
 import { useAuth } from '@/context/AuthContext';
 import { productAPI, reviewAPI } from '@/lib/api';
 import { MobileNav } from '@/components/layout/MobileNav';
+import toast from 'react-hot-toast';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -137,59 +138,137 @@ export default function ProductDetailPage() {
   // HANDLE FUNCTIONS
   // ============================================
 
-  const handleAddToCart = async () => {
+ const handleAddToCart = async () => {
   if (!product) return;
-
-  // ✅ DEBUG: Log auth state
-  console.log('=== ADD TO CART DEBUG ===');
-  console.log('isAuthenticated:', isAuthenticated);
-  console.log('user:', user);
-  console.log('token:', getCookie('accessToken'));
-  console.log('localStorage user:', localStorage.getItem('user'));
-  console.log('========================');
 
   // ✅ CHECK AUTH
   const token = getCookie('accessToken');
   
   if (!token) {
-    alert('Silakan login untuk menambahkan ke keranjang');
+    toast.error('🔐 Silakan login untuk menambahkan ke keranjang', {
+      duration: 4000,
+      icon: '🔐',
+    });
     router.push('/login');
     return;
   }
 
-  // Validasi quantity
-  if (quantity < product.min_order) {
-    setError(`Minimal pesanan adalah ${product.min_order} ${product.unit}`);
+  // ✅ VALIDASI PRE-ORDER: Cek kuota PO
+  const isPreOrder = product.status === 'pre-order' || product.status === 'pre_order';
+  const remainingQuota = isPreOrder 
+    ? ((product.po_quota ?? 999999) - (product.po_sold || 0)) 
+    : null;
+
+  if (isPreOrder && remainingQuota !== null && remainingQuota <= 0) {
+    toast.error('😔 Kuota Pre-Order sudah habis', {
+      duration: 5000,
+      icon: '🚫',
+      // ✅ Saran alternatif
+      action: {
+        label: 'Lihat Produk Lain',
+        onClick: () => router.push('/katalog'),
+      },
+    });
+    setError('Maaf, kuota Pre-Order untuk produk ini sudah penuh.');
     return;
-  }
-
-  if (product.status === 'ready_stock' && quantity > product.stock) {
-    setError(`Stok tidak mencukupi. Tersedia ${product.stock} ${product.unit}`);
-    return;
-  }
-
-  setIsAdding(true);
-  setError(null);
-
-  try {
-    console.log('Calling addToCart...');
-    await addToCart(product.id, quantity);
-    console.log('addToCart success!');
-    alert('✅ Produk berhasil ditambahkan ke keranjang!');
-    setQuantity(product.min_order);
-  } catch (err: any) {
-    console.error('Add to cart error:', err);
-    setError(err.message || 'Gagal menambahkan ke keranjang');
-    
-    // Jika error unauthorized, redirect ke login
-    if (err.message?.includes('Unauthorized') || err.message?.includes('unauthorized')) {
-      alert('Sesi expired. Silakan login kembali.');
-      router.push('/login');
     }
-  } finally {
-    setIsAdding(false);
-  }
-};
+
+    // ✅ VALIDASI PRE-ORDER: Cek masa panen
+    if (isPreOrder && product.harvest_date) {
+      const harvestDate = new Date(product.harvest_date);
+      const today = new Date();
+      // Reset time untuk perbandingan tanggal saja
+      harvestDate.setHours(0, 0, 0, 0);
+      today.setHours(0, 0, 0, 0);
+
+      if (today > harvestDate) {
+        toast.error('🍂 Masa panen sudah lewat', {
+          duration: 5000,
+          icon: '📅',
+          // ✅ Info kapan panen berikutnya (opsional)
+          action: {
+            label: 'Notifikasi Saat Tersedia',
+            onClick: () => {
+              // TODO: Implement fitur notifikasi
+              toast.success('✅ Anda akan kami beri tahu saat produk tersedia!', {
+                duration: 3000,
+              });
+            },
+          },
+        });
+        setError(`Masa panen produk ini (${harvestDate.toLocaleDateString('id-ID')}) sudah lewat. Produk akan segera diupdate oleh petani.`);
+        return;
+      }
+    }
+
+    // Validasi quantity minimal
+    if (quantity < product.min_order) {
+      setError(`Minimal pesanan adalah ${product.min_order} ${product.unit}`);
+      toast.error(`⚠️ Minimal pesanan ${product.min_order} ${product.unit}`, {
+        duration: 3000,
+        icon: '📦',
+      });
+      return;
+    }
+
+    // Validasi stok untuk ready_stock
+    if (product.status === 'ready_stock' && quantity > product.stock) {
+      setError(`Stok tidak mencukupi. Tersedia ${product.stock} ${product.unit}`);
+      toast.error(`❌ Stok tersisa ${product.stock} ${product.unit}`, {
+        duration: 4000,
+        icon: '📉',
+        // ✅ Saran: kurangi quantity
+        action: {
+          label: `Ambil ${product.stock} ${product.unit}`,
+          onClick: () => setQuantity(product.stock),
+        },
+      });
+      return;
+    }
+
+    setIsAdding(true);
+    setError(null);
+
+    try {
+      console.log('Calling addToCart...');
+      await addToCart(product.id, quantity);
+      console.log('addToCart success!');
+      
+      // ✅ Success toast dengan detail
+      toast.success('✅ Ditambahkan ke keranjang!', {
+        duration: 3000,
+        icon: '🛒',
+        action: {
+          label: 'Lihat Keranjang',
+          onClick: () => router.push('/keranjang'),
+        },
+      });
+      
+      setQuantity(product.min_order);
+      
+    } catch (err: any) {
+      console.error('Add to cart error:', err);
+      const errorMessage = err.message || 'Gagal menambahkan ke keranjang';
+      
+      setError(errorMessage);
+      
+      // ✅ Error toast yang lebih deskriptif
+      toast.error(`❌ ${errorMessage}`, {
+        duration: 4000,
+        icon: '⚠️',
+      });
+      
+      // Jika error unauthorized, redirect ke login
+      if (err.message?.includes('Unauthorized') || err.message?.includes('unauthorized')) {
+        toast.error('🔐 Sesi expired. Silakan login kembali.', {
+          duration: 3000,
+        });
+        router.push('/login');
+      }
+    } finally {
+      setIsAdding(false);
+    }
+  };
 
   const handleSubmitReview = async () => {
     if (!isAuthenticated) {

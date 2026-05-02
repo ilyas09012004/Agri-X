@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
       await connection.execute(`DELETE FROM cart_items WHERE user_id = ?`, [userId]);
 
       // 5. Handle Payment (Midtrans or COD)
-      let paymentUrl = null;
+      let payment_url = null;
       let transactionId = null;
       let vaNumber = null;
 
@@ -378,7 +378,7 @@ export async function POST(req: NextRequest) {
         // Create Midtrans Transaction
         const snapResponse = await snap.createTransaction(parameter);
         
-        paymentUrl = snapResponse.redirect_url;
+        payment_url = snapResponse.redirect_url;
         transactionId = snapResponse.token;
 
         if (snapResponse.va_numbers && snapResponse.va_numbers.length > 0) {
@@ -388,7 +388,7 @@ export async function POST(req: NextRequest) {
         // Update Order with Payment Info (snake_case)
         await connection.execute(
           `UPDATE orders SET order_id = ?, payment_url = ?, va_number = ? WHERE id = ?`,
-          [transactionId, paymentUrl, vaNumber, orderId]
+          [transactionId, payment_url, vaNumber, orderId]
         );
 
         // Insert Payment Record (snake_case)
@@ -430,7 +430,7 @@ export async function POST(req: NextRequest) {
         success: true,
         orderId,
         transactionId,
-        paymentUrl,
+        payment_url,
         vaNumber,
         message: paymentMethod === 'cod' 
           ? 'Pesanan berhasil dibuat! Silakan siapkan uang tunai saat barang diterima.' 
@@ -441,7 +441,7 @@ export async function POST(req: NextRequest) {
           itemCount: items.length,
           paymentMethod,
           paymentGateway,
-          paymentUrl,
+          payment_url,
           vaNumber,
           paymentDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         }

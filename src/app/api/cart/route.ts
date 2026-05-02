@@ -114,91 +114,110 @@ export async function POST(req: NextRequest) {
       throw new Error('Product ID and quantity are required');
     }
 
-    // ✅ Query: Pakai snake_case & ambil weight untuk validasi jika perlu
+    // ✅ Query: Ambil data produk lengkap untuk validasi
     const [productRows] = await pool.execute(
-      `SELECT id, stock, min_order, status, po_quota, po_sold, harvest_date, weight 
-       FROM products WHERE id = ? AND status != ?`,
-      [productId, 'deleted']
+      `SELECT id, name, stock, min_order, status, po_quota, po_sold, harvest_date, unit 
+       FROM products WHERE id = ? AND status != 'deleted'`,
+      [productId]
     );
 
     if ((productRows as any[]).length === 0) {
-      throw new Error('Product not found or deleted');
+      throw new Error('Produk tidak ditemukan atau sudah dihapus.');
     }
 
     const product = (productRows as any[])[0];
 
-    // ✅ Validasi berdasarkan STATUS
+    // ✅ Validasi: Produk Sold Out
     if (product.status === 'sold_out') {
-      throw new Error('Product is currently sold out.');
+      throw new Error(`😔 Maaf, "${product.name}" sedang habis. Silakan cek produk lain.`);
     }
 
-    // ✅ LOGIKA PRE-ORDER
-    if (product.status === 'pre-order') {
+    // ✅ LOGIKA PRE-ORDER: Validasi Kuota
+    if (product.status === 'pre-order' || product.status === 'pre_order') {
       const remainingQuota = (product.po_quota || 0) - (product.po_sold || 0);
       
+      if (remainingQuota <= 0) {
+        // 🎯 Pesan empatik untuk quota habis
+        throw new Error(`🚫 Kuota Pre-Order "${product.name}" sudah penuh. Terima kasih atas antusiasmenya!`);
+      }
+      
       if (quantity > remainingQuota) {
-        throw new Error(`Kuota Pre-Order tersisa ${remainingQuota}. Silakan kurangi jumlah pesanan.`);
+        // 🎯 Pesan solutif: tawarkan sisa kuota
+        throw new Error(`⚠️ Kuota tersisa hanya ${remainingQuota} ${product.unit}. Silakan kurangi jumlah pesanan.`);
       }
 
+      // ✅ Validasi: Tanggal Panen
       if (!product.harvest_date) {
-        throw new Error('Tanggal panen Pre-Order belum ditetapkan oleh petani.');
+        throw new Error(`📅 Tanggal panen "${product.name}" belum ditetapkan. Silakan hubungi petani untuk konfirmasi.`);
       }
 
-      // Handle harvest_date validation
+      // Parse harvest_date dengan aman
       let harvestDate: Date;
-      if (product.harvest_date instanceof Date) {
-        harvestDate = new Date(product.harvest_date);
+      try {
+        if (product.harvest_date instanceof Date) {
+          harvestDate = new Date(product.harvest_date);
+        } else if (typeof product.harvest_date === 'string') {
+          // Format: 'YYYY-MM-DD' dari MySQL
+          const [year, month, day] = product.harvest_date.split('-').map(Number);
+          harvestDate = new Date(year, (month || 1) - 1, day || 1);
+        } else {
+          throw new Error('Invalid date format');
+        }
+        // Reset time untuk perbandingan tanggal saja
         harvestDate.setHours(0, 0, 0, 0);
-      } else if (typeof product.harvest_date === 'string') {
-        const [year, month, day] = product.harvest_date.split('-').map(Number);
-        harvestDate = new Date(year, (month || 1) - 1, day || 1);
-      } else {
-        throw new Error('Format harvest_date tidak valid');
+      } catch (e) {
+        console.error('Error parsing harvest_date:', product.harvest_date);
+        throw new Error('Format tanggal panen tidak valid.');
       }
       
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
       if (harvestDate < today) {
-        const dateStr = product.harvest_date instanceof Date 
-          ? product.harvest_date.toISOString().split('T')[0] 
-          : product.harvest_date;
-        throw new Error(`Tanggal panen Pre-Order (${dateStr}) sudah lewat. Hubungi petani untuk konfirmasi.`);
+        const dateStr = harvestDate.toLocaleDateString('id-ID', {
+          day: 'numeric', month: 'long', year: 'numeric'
+        });
+        // 🎯 Pesan informatif + harapan (tidak menyalahkan)
+        throw new Error(`🍂 Masa panen "${product.name}" (${dateStr}) sudah lewat. Produk akan segera diupdate oleh petani.`);
       }
     }
-    // ✅ LOGIKA READY_STOCK
+    
+    // ✅ LOGIKA READY_STOCK: Validasi Stok & Min Order
     else if (product.status === 'ready_stock') {
       if (quantity < product.min_order) {
-        throw new Error(`Quantity must be at least ${product.min_order}`);
+        throw new Error(`📦 Minimal pesanan "${product.name}" adalah ${product.min_order} ${product.unit}.`);
       }
       if (quantity > product.stock) {
-        throw new Error(`Insufficient stock. Available: ${product.stock}`);
+        // 🎯 Tawarkan solusi: ambil stok tersisa
+        throw new Error(`❌ Stok "${product.name}" tersisa ${product.stock} ${product.unit}. Silakan kurangi jumlah pesanan.`);
       }
     }
+    
+    // ✅ Status lain tidak tersedia
     else {
-      throw new Error('Product is currently unavailable.');
+      throw new Error(`⚠️ "${product.name}" sedang tidak tersedia untuk dipesan.`);
     }
 
-    // Cek apakah produk sudah ada di keranjang
+    // ✅ Cek apakah produk sudah ada di keranjang user
     const [existingCartRows] = await pool.execute(
       'SELECT id, quantity FROM cart_items WHERE user_id = ? AND product_id = ?',
       [userId, productId]
     );
 
     if ((existingCartRows as any[]).length > 0) {
-      // Update jumlah
+      // Update: tambah quantity existing
       const existingQuantity = (existingCartRows as any[])[0].quantity;
       const newQuantity = existingQuantity + quantity;
 
-      // ✅ Validasi ulang berdasarkan status
-      if (product.status === 'pre-order') {
+      // ✅ Validasi ulang total quantity setelah update
+      if (product.status === 'pre-order' || product.status === 'pre_order') {
         const remainingQuota = (product.po_quota || 0) - (product.po_sold || 0);
         if (newQuantity > remainingQuota) {
-          throw new Error(`Kuota Pre-Order tersisa ${remainingQuota}. Total di keranjang melebihi kuota.`);
+          throw new Error(`⚠️ Total di keranjang melebihi kuota Pre-Order. Sisa kuota: ${remainingQuota} ${product.unit}.`);
         }
       } else if (product.status === 'ready_stock') {
         if (newQuantity > product.stock) {
-          throw new Error(`Insufficient stock for total quantity. Available: ${product.stock}`);
+          throw new Error(`❌ Total quantity melebihi stok tersedia (${product.stock} ${product.unit}).`);
         }
       }
 
@@ -207,29 +226,29 @@ export async function POST(req: NextRequest) {
         [newQuantity, userId, productId]
       );
     } else {
-      // Insert baru
-      if (product.status === 'pre-order') {
-        const remainingQuota = (product.po_quota || 0) - (product.po_sold || 0);
-        if (quantity > remainingQuota) {
-          throw new Error(`Kuota Pre-Order tersisa ${remainingQuota}.`);
-        }
-      } else if (product.status === 'ready_stock') {
-        if (quantity > product.stock) {
-          throw new Error(`Insufficient stock. Available: ${product.stock}`);
-        }
-      }
-
+      // Insert: cart item baru
       await pool.execute(
         'INSERT INTO cart_items (user_id, product_id, quantity, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
         [userId, productId, quantity]
       );
     }
 
-    return NextResponse.json({ success: true, message: 'Product added to cart successfully' });
+    return NextResponse.json({ 
+      success: true, 
+      message: '✅ Produk berhasil ditambahkan ke keranjang!',
+      data: { productId, quantity }
+    });
 
   } catch (err: any) {
     console.error('Error adding to cart:', err);
-    return handleAPIError(err, 'POST /api/cart');
+    
+    // ✅ Pastikan error message user-friendly sampai ke frontend
+    const userMessage = err.message || 'Terjadi kesalahan saat menambahkan ke keranjang.';
+    
+    return NextResponse.json(
+      { success: false, error: userMessage },
+      { status: err.message?.includes('Unauthorized') ? 401 : 400 }
+    );
   }
 }
 

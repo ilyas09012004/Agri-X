@@ -28,75 +28,15 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
-// Payment Methods Config
+// ✅ SIMPLIFIED Payment Methods: Hanya Transfer & COD
 const paymentMethods = [
   {
-    id: 'va_bca',
-    name: 'BCA Virtual Account',
+    id: 'bank_transfer',
+    name: 'Transfer Bank (Midtrans)',
     icon: Building,
     type: 'bank_transfer',
-    bank: 'bca',
     fee: 0,
-    description: 'Transfer via ATM, Mobile Banking',
-  },
-  {
-    id: 'va_mandiri',
-    name: 'Mandiri Virtual Account',
-    icon: Building,
-    type: 'bank_transfer',
-    bank: 'mandiri',
-    fee: 0,
-    description: 'Transfer via ATM, Livin Mandiri',
-  },
-  {
-    id: 'va_bri',
-    name: 'BRI Virtual Account',
-    icon: Building,
-    type: 'bank_transfer',
-    bank: 'bri',
-    fee: 0,
-    description: 'Transfer via ATM, BRImo',
-  },
-  {
-    id: 'va_bni',
-    name: 'BNI Virtual Account',
-    icon: Building,
-    type: 'bank_transfer',
-    bank: 'bni',
-    fee: 0,
-    description: 'Transfer via Mobile Banking',
-  },
-  {
-    id: 'gopay',
-    name: 'GoPay',
-    icon: Smartphone,
-    type: 'ewallet',
-    fee: 2000,
-    description: 'Bayar menggunakan GoPay',
-  },
-  {
-    id: 'ovo',
-    name: 'OVO',
-    icon: Smartphone,
-    type: 'ewallet',
-    fee: 2000,
-    description: 'Bayar menggunakan OVO',
-  },
-  {
-    id: 'dana',
-    name: 'DANA',
-    icon: Smartphone,
-    type: 'ewallet',
-    fee: 2000,
-    description: 'Bayar menggunakan DANA',
-  },
-  {
-    id: 'qris',
-    name: 'QRIS',
-    icon: QrCode,
-    type: 'qris',
-    fee: 1500,
-    description: 'Scan QR Code semua e-wallet',
+    description: 'BCA, Mandiri, BRI, BNI, dll via Virtual Account',
   },
   {
     id: 'cod',
@@ -104,7 +44,7 @@ const paymentMethods = [
     icon: Wallet,
     type: 'cod',
     fee: 5000,
-    description: 'Bayar tunai saat diterima',
+    description: 'Bayar tunai saat barang diterima',
   },
 ];
 
@@ -660,6 +600,7 @@ export default function CheckoutPage() {
   };
 
   // ✅ MAIN: Place order dengan Modal Popup
+    // ✅ MAIN: Place order
   const handlePlaceOrder = async () => {
     if (!selectedAddressId || !selectedAddressData) {
       setError('Pilih alamat pengiriman terlebih dahulu.');
@@ -686,12 +627,10 @@ export default function CheckoutPage() {
       if (!token) throw new Error('Sesi tidak ditemukan.');
 
       const paymentMethod = paymentMethods.find(p => p.id === selectedPayment);
-      const orderId = `AGR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      // ✅ Simpan order ID untuk modal
-      setCurrentOrderId(orderId);
 
       // 1. Create order in database
+      // ❌ HAPUS: const orderId = `AGR-...`; (Biarkan backend yang generate)
+      
       const orderRes = await fetch('/api/orders', {
         method: 'POST',
         headers: {
@@ -699,7 +638,7 @@ export default function CheckoutPage() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          orderId, 
+          // ❌ HAPUS field orderId dari sini, biarkan backend auto-generate
           addressId: selectedAddressId,
           shippingCost: shippingCost,
           totalAmount: grandTotal,
@@ -719,39 +658,26 @@ export default function CheckoutPage() {
         throw new Error(orderData.error || 'Gagal membuat pesanan');
       }
 
-      // 2. Handle payment
-      if (paymentMethod?.type !== 'cod') {
-        // Call Midtrans to get snap token
-        const midtransRes = await fetch('/api/payment/midtrans', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            orderId: orderId,
-            grossAmount: grandTotal,
-            paymentType: selectedPayment,
-          }),
-        });
+      // ✅ AMBIL ID INTEGER (Primary Key)
+      const internalOrderId = orderData.id; 
 
-        const midtransData = await midtransRes.json();
-        if (!midtransRes.ok) {
-          throw new Error(midtransData.error || 'Gagal membuat pembayaran');
-        }
-
-        setSuccess('✅ Pesanan berhasil dibuat! Membuka halaman pembayaran...');
-        
-        // ✅ SET SNAP TOKEN & SHOW MODAL
-        setSnapToken(midtransData.snapToken);
-        setShowPaymentModal(true);
-        
-        // ✅ Snap.js callbacks akan di-handle di PaymentModal component
-        return;
+      if (!internalOrderId) {
+        throw new Error('Gagal mendapatkan ID Pesanan dari server');
       }
 
-      // 3. COD: redirect directly
-      router.push(`/orders/${orderId}?payment=cod`);
+      console.log('Order created with ID:', internalOrderId);
+
+      // 2. Handle Payment
+      if (paymentMethod?.id === 'bank_transfer') {
+        
+        // Redirect ke halaman pay
+        // Halaman pay nanti yang akan memanggil API Midtrans atau menampilkan instruksi
+        router.push(`/orders/${internalOrderId}/pay`);
+        
+      } else {
+        // COD: Redirect ke halaman konfirmasi COD
+        router.push(`/orders/${internalOrderId}/cod`);
+      }
 
     } catch (err: any) {
       console.error('Checkout failed:', err);

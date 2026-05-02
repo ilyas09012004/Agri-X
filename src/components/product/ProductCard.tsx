@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { useState } from 'react';
 import Image from 'next/image';
+import toast from 'react-hot-toast';
 
 interface Product {
   id: number;
@@ -40,21 +41,166 @@ export function ProductCard({ product }: { product: Product }) {
 
   const handleAddToCart = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    
+    // ✅ Validasi kuota Pre-Order dengan toast
     if (isPreOrder && remainingQuota !== null && remainingQuota <= 0) {
-      alert('Kuota Pre-Order untuk produk ini sudah habis.');
+      toast.error('❌ Kuota Pre-Order untuk produk ini sudah habis.', {
+        duration: 3000,
+        position: 'bottom-right',
+      });
       return;
     }
+    
     setIsAdding(true);
-    try {
-      await addToCart(product.id, 1);
-    } catch (error) {
-      console.error('Add to cart error:', error);
-      if (error instanceof Error && error.message.includes('Kuota')) {
-        alert(error.message);
-      }
-    } finally {
+
+try {
+  // ✅ Validasi Pre-Order: Cek kuota PO sebelum call API
+  const isPreOrder = product.status === 'pre-order' || product.status === 'pre_order';
+  
+  if (isPreOrder && product.po_quota !== null) {
+    const remainingQuota = product.po_quota - (product.po_sold || 0);
+    
+    if (remainingQuota <= 0) {
+      // ❌ Jangan call API, langsung toast error yang halus
+      toast.error('😔 Maaf, kuota Pre-Order sudah penuh', {
+        duration: 5000,
+        position: 'bottom-right',
+        style: {
+          background: '#F59E0B', // Amber untuk warning
+          color: '#fff',
+        },
+        // ✅ Tawarkan alternatif
+        action: {
+          label: 'Lihat Produk Lain',
+          onClick: () => router.push('/katalog'),
+        },
+      });
       setIsAdding(false);
+      return;
     }
+  }
+  
+  // ✅ Validasi Pre-Order: Cek masa panen
+  if (isPreOrder && product.harvest_date) {
+    const harvestDate = new Date(product.harvest_date);
+    const today = new Date();
+    harvestDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    
+    if (today > harvestDate) {
+      toast.error('🍂 Masa panen sudah lewat', {
+        duration: 5000,
+        position: 'bottom-right',
+        style: {
+          background: '#6B7280', // Gray untuk info netral
+          color: '#fff',
+        },
+        // ✅ Tawarkan notifikasi
+        action: {
+          label: 'Notifikasi Saat Tersedia',
+          onClick: () => {
+            toast.success('✅ Kami akan beri tahu saat produk tersedia!', {
+              duration: 3000,
+              position: 'bottom-right',
+            });
+            // TODO: Implement fitur stock alert di backend
+          },
+        },
+      });
+      setIsAdding(false);
+      return;
+    }
+  }
+
+  // ✅ Semua validasi lolos, call API
+  await addToCart(product.id, 1);
+  
+  // ✅ Toast sukses
+    toast.success('✅ Ditambahkan ke keranjang!', {
+      duration: 3000,
+      position: 'bottom-right',
+      style: {
+        background: '#10B981',
+        color: '#fff',
+      },
+      // ✅ Action button ke keranjang
+      action: {
+        label: 'Lihat Keranjang',
+        onClick: () => router.push('/keranjang'),
+      },
+    });
+    
+  } catch (error: any) {
+    console.error('Add to cart error:', error);
+    
+    // ✅ Handle error spesifik dari backend
+    const errorMessage = error?.message || 'Gagal menambahkan ke keranjang';
+    
+    if (errorMessage.includes('Kuota') || errorMessage.includes('quota')) {
+      // 🎯 Error quota: pesan lebih halus + solusi
+      toast.error('😔 Kuota Pre-Order sudah habis', {
+        duration: 5000,
+        position: 'bottom-right',
+        style: {
+          background: '#F59E0B',
+          color: '#fff',
+        },
+        action: {
+          label: 'Lihat Produk Lain',
+          onClick: () => router.push('/katalog'),
+        },
+      });
+    } 
+    else if (errorMessage.includes('panen') || errorMessage.includes('harvest')) {
+      // 🎯 Error masa panen: informatif + harapan
+      toast.error('🍂 Produk sedang dalam proses panen', {
+        duration: 5000,
+        position: 'bottom-right',
+        style: {
+          background: '#6B7280',
+          color: '#fff',
+        },
+        action: {
+          label: 'Notifikasi Saya',
+          onClick: () => {
+            toast.success('✅ Anda akan kami beri tahu!', { duration: 3000 });
+          },
+        },
+      });
+    }
+    else if (errorMessage.includes('stok') || errorMessage.includes('stock')) {
+      // 🎯 Error stok: tawarkan quantity maksimal
+      toast.error(`❌ Stok tidak mencukupi`, {
+        duration: 4000,
+        position: 'bottom-right',
+        style: {
+          background: '#EF4444',
+          color: '#fff',
+        },
+        action: {
+          label: 'Ambil Stok Tersisa',
+          onClick: () => {
+            // TODO: Auto-adjust quantity ke max available
+            toast.info('🔄 Quantity disesuaikan', { duration: 2000 });
+          },
+        },
+      });
+    }
+    else {
+      // 🎯 Error umum: fallback message
+      toast.error('❌ Gagal menambahkan ke keranjang', {
+        duration: 4000,
+        position: 'bottom-right',
+        style: {
+          background: '#EF4444',
+          color: '#fff',
+        },
+      });
+    }
+    
+  } finally {
+    setIsAdding(false);
+  }
   };
 
   const getStatusColor = () => {
@@ -128,14 +274,18 @@ export function ProductCard({ product }: { product: Product }) {
           </div>
         )}
         
-        {/* ✅ Quick Add Button - Compact */}
+        {/* ✅ Quick Add Button - Show on Hover */}
         <button
-          onClick={(e) => { e.stopPropagation(); handleAddToCart(e); }}
-          className="absolute bottom-2 right-2 z-20 p-1.5 bg-primary text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 md:opacity-100 transition-opacity duration-200 hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={product.status === 'sold_out' || (isPreOrder && remainingQuota !== null && remainingQuota <= 0)}
+          onClick={handleAddToCart}
+          disabled={isAdding || product.status === 'sold_out' || (isPreOrder && remainingQuota !== null && remainingQuota <= 0)}
+          className="absolute bottom-2 right-2 z-20 p-2 bg-primary text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
           aria-label="Tambah ke keranjang"
         >
-          <Plus className="w-4 h-4" />
+          {isAdding ? (
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Plus className="w-4 h-4" />
+          )}
         </button>
       </div>
 

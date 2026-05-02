@@ -77,7 +77,7 @@ export default function LoginPage() {
       localStorage.setItem('user', JSON.stringify(userData));
 
       // Update Context Auth
-      login(token, userData);
+      login(token, userData); 
       
       // ✅ REDIRECT KE HALAMAN AKUN SETELAH LOGIN SUKSES
       router.push('/katalog'); 

@@ -7,6 +7,7 @@ import { Trash2, Minus, Plus, ShoppingCart, Loader2 } from 'lucide-react';
 import { getCookie } from '@/lib/auth';
 import { useCart } from '@/context/CartContext';
 import { formatCurrency } from '@/lib/utils';
+import toast from 'react-hot-toast';
 
 
 export default function CartPage() {
@@ -91,7 +92,6 @@ export default function CartPage() {
       console.log('token:', token ? 'EXISTS' : 'MISSING');
       console.log('==============================');
       
-      // ✅ Endpoint menggunakan productId di URL
       const res = await fetch(`/api/cart/${productId}`, {
         method: 'PUT',
         headers: {
@@ -117,23 +117,82 @@ export default function CartPage() {
             : item
         )
       );
+      
+      // ✅ Toast sukses update quantity (opsional, untuk feedback)
+      toast.success('✅ Quantity diperbarui', {
+        duration: 2000,
+        position: 'bottom-right',
+        style: {
+          background: '#10B981',
+          color: '#fff',
+        },
+      });
+      
     } catch (err: any) {
       console.error('Update quantity error:', err);
       setError(err.message);
-      alert(err.message);
+      
+      // ❌ alert(err.message);
+      // ✅ Ganti dengan toast.error yang user-friendly
+      const errorMessage = err.message || 'Gagal memperbarui quantity';
+      
+      if (errorMessage.includes('Kuota') || errorMessage.includes('quota')) {
+        toast.error('😔 Kuota Pre-Order sudah habis', {
+          duration: 4000,
+          position: 'bottom-right',
+          style: {
+            background: '#F59E0B',
+            color: '#fff',
+          },
+          action: {
+            label: 'Kurangi Quantity',
+            onClick: () => {
+              // Auto-adjust ke quantity maksimal yang tersedia
+              setItems(prev => prev.map(item => 
+                item.productId === productId 
+                  ? { ...item, quantity: Math.max(item.product.min_order, item.product.stock) }
+                  : item
+              ));
+            },
+          },
+        });
+      } 
+      else if (errorMessage.includes('stok') || errorMessage.includes('stock')) {
+        toast.error('❌ Stok tidak mencukupi', {
+          duration: 4000,
+          position: 'bottom-right',
+          style: {
+            background: '#EF4444',
+            color: '#fff',
+          },
+          action: {
+            label: 'Ambil Stok Tersisa',
+            onClick: () => {
+              // TODO: Auto-adjust quantity
+            },
+          },
+        });
+      }
+      else {
+        toast.error(`❌ ${errorMessage}`, {
+          duration: 4000,
+          position: 'bottom-right',
+          style: {
+            background: '#EF4444',
+            color: '#fff',
+          },
+        });
+      }
+      
     } finally {
       setIsUpdating(null);
     }
   };
-
   // ✅ Dalam handleRemove, gunakan productId untuk endpoint
   const handleRemove = async (productId: number) => {
-    if (!confirm('Hapus produk dari keranjang?')) return;
-    
     try {
       const token = getCookie('accessToken') || localStorage.getItem('accessToken');
       
-      // ✅ Endpoint menggunakan productId di URL
       const res = await fetch(`/api/cart/${productId}`, {
         method: 'DELETE',
         headers: {
@@ -146,12 +205,31 @@ export default function CartPage() {
         throw new Error(errorData.error || 'Gagal menghapus produk');
       }
 
-      // Update local state
+      // ✅ Update local state
       setItems(prevItems => prevItems.filter(item => item.productId !== productId));
+      
+      // ✅ Toast sukses (tanpa Undo)
+      toast.success('✅ Produk dihapus dari keranjang', {
+        duration: 2500, // Lebih singkat karena tidak ada action
+        position: 'bottom-right',
+        style: {
+          background: '#10B981',
+          color: '#fff',
+        },
+      });
+      
     } catch (err: any) {
       console.error('Remove item error:', err);
       setError(err.message);
-      alert(err.message);
+      
+      toast.error(`❌ ${err.message}`, {
+        duration: 4000,
+        position: 'bottom-right',
+        style: {
+          background: '#EF4444',
+          color: '#fff',
+        },
+      });
     }
   };
 

@@ -1,14 +1,13 @@
-// src/app/api/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { verifyAccessToken } from '@/utils/jwt.util'; // Pastikan path import benar
+import { verifyAccessToken } from '@/utils/jwt.util';
 import { handleAPIError } from '@/lib/middleware';
 
 type Params = {
   params: Promise<{ id: string }>;
 };
 
-// Helper untuk format date ISO string atau null
+// Helper untuk format date
 const formatDate = (date: any) => {
   if (!date) return null;
   try {
@@ -40,11 +39,12 @@ export async function GET(req: NextRequest, { params }: Params) {
       return NextResponse.json({ success: false, error: 'Invalid Order ID' }, { status: 400 });
     }
 
-    // 2. Fetch Order Data with Snake_case Columns
+    // 2. Fetch Order Data & Address
+    // Kita pisahkan query Payment agar bisa menggunakan ORDER BY DESC LIMIT 1 dengan aman
     const [orderRows] = await pool.execute(
       `SELECT 
         o.id,
-        o.order_id,
+        o.transaction_id,
         o.user_id,
         o.address_id,
         o.status,
@@ -60,13 +60,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         o.tracking_number,
         o.created_at,
         o.updated_at,
-        -- Payment Details (from payments table)
-        p.va_number,
-        p.bank_name,
-        p.transaction_id,
-        p.payment_deadline,
-        p.paid_at,
-        -- Address Details (from address table)
+        -- Address Details
         a.detail AS address_detail,
         a.city,
         a.district,
@@ -77,7 +71,6 @@ export async function GET(req: NextRequest, { params }: Params) {
         a.recipient_phone
       FROM orders o
       LEFT JOIN address a ON o.address_id = a.id
-      LEFT JOIN payment p ON o.id = p.order_id
       WHERE o.id = ? AND o.user_id = ?`,
       [orderId, userId]
     );
@@ -88,11 +81,29 @@ export async function GET(req: NextRequest, { params }: Params) {
 
     const order = (orderRows as any)[0];
 
-    // 3. Fetch Order Items
+    // 3. Fetch Latest Payment Record
+    // Menggunakan subquery atau limit untuk memastikan hanya ambil transaksi TERBARU
+    const [paymentRows] = await pool.execute(
+      `SELECT 
+        va_number,
+        bank_name,
+        transaction_id,
+        payment_deadline,
+        paid_at,
+        status as payment_record_status
+      FROM payment
+      WHERE transaction_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1`,
+      [orderId]
+    );
+    
+    const payment = (paymentRows as any[])[0] || {};
+
+    // 4. Fetch Order Items
     const [itemsRows] = await pool.execute(
       `SELECT 
         oi.id,
-        oi.order_id,
         oi.product_id,
         oi.quantity,
         oi.price,
@@ -102,14 +113,14 @@ export async function GET(req: NextRequest, { params }: Params) {
         p.unit AS product_unit
       FROM order_items oi
       JOIN products p ON oi.product_id = p.id
-      WHERE oi.order_id = ?`,
+      WHERE oi.transaction_id = ?`,
       [orderId]
     );
 
-    // 4. Format Response to CamelCase for Frontend
+    // 5. Format Response to CamelCase for Frontend
     const formattedOrder = {
       id: order.id,
-      orderId: order.order_id,
+      orderId: order.transaction_id,
       userId: order.user_id,
       addressId: order.address_id,
       status: order.status,
@@ -128,12 +139,12 @@ export async function GET(req: NextRequest, { params }: Params) {
       courierCode: order.courier_code,
       trackingNumber: order.tracking_number,
       
-      // Payment Info
-      vaNumber: order.va_number,
-      bankName: order.bank_name,
-      transactionId: order.transaction_id,
-      paymentDeadline: formatDate(order.payment_deadline),
-      paidAt: formatDate(order.paid_at),
+      // Payment Info (dari query terpisah)
+      vaNumber: payment.va_number || null,
+      bankName: payment.bank_name || null,
+      transactionId: payment.transaction_id || null,
+      paymentDeadline: formatDate(payment.payment_deadline),
+      paidAt: formatDate(payment.paid_at),
       
       // Timestamps
       createdAt: formatDate(order.created_at),
@@ -151,13 +162,13 @@ export async function GET(req: NextRequest, { params }: Params) {
         recipientPhone: order.recipient_phone,
       },
       
-      // ✅ Items Array dengan Mapping Manual & Type Conversion
+      // ✅ Items Array
       items: (itemsRows as any[]).map((item: any) => ({
         id: item.id,
         productId: item.product_id,
-        quantity: Number(item.quantity),   // ✅ Penting: Convert ke Number
-        price: Number(item.price),         // ✅ Penting: Harga Satuan (Number)
-        subtotal: Number(item.subtotal),   // ✅ Penting: Total per Item (Number)
+        quantity: Number(item.quantity),
+        price: Number(item.price),
+        subtotal: Number(item.subtotal),
         productName: item.product_name,
         productImage: item.product_image,
         productUnit: item.product_unit,
@@ -170,6 +181,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     });
 
   } catch (error: any) {
+    console.error('Error fetching order detail:', error);
     return handleAPIError(error, 'GET /api/orders/[id]');
   }
 }

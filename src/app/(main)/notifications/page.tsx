@@ -1,10 +1,10 @@
-// src/app/notifications/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Bell, Check, Trash2, ExternalLink, X, Filter, Loader2 } from 'lucide-react';
+import { ArrowLeft, Bell, Check, Trash2, ExternalLink, X, Clock, User, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import toast from 'react-hot-toast'; // ✅ Import toast
 
 export interface Notification {
   id: string;
@@ -22,22 +22,230 @@ export interface Notification {
   referenceId?: string;
 }
 
-const typeColors: Record<Notification['type'], string> = {
+// ✅ typeColors dengan fallback 'default'
+const typeColors: Record<Notification['type'] | 'default', string> = {
   order: 'bg-primary/10 text-primary border-primary/20',
   payment: 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800',
   forum: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800',
   system: 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700',
   promo: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800',
+  default: 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700',
 };
 
-const typeIcons: Record<Notification['type'], JSX.Element> = {
+// ✅ typeIcons dengan fallback 'default'
+const typeIcons: Record<Notification['type'] | 'default', JSX.Element> = {
   order: <Bell className="w-5 h-5" />,
   payment: <Check className="w-5 h-5" />,
   forum: <Bell className="w-5 h-5" />,
   system: <Bell className="w-5 h-5" />,
   promo: <Bell className="w-5 h-5" />,
+  default: <Bell className="w-5 h-5" />,
 };
 
+// ✅ typeLabels untuk display
+const typeLabels: Record<Notification['type'] | 'default', string> = {
+  order: 'Pesanan',
+  payment: 'Pembayaran',
+  forum: 'Forum',
+  system: 'Sistem',
+  promo: 'Promo',
+  default: 'Notifikasi',
+};
+
+// ============================================================================
+// ✅ INLINE COMPONENT: NotificationDetailModal (dengan type safety)
+// ============================================================================
+function NotificationDetailModal({
+  notification,
+  onClose,
+  onMarkAsRead,
+  onDelete,
+  onNavigate,
+}: {
+  notification: Notification | null;
+  onClose: () => void;
+  onMarkAsRead: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onNavigate: (link?: string) => void;
+}) {
+  // ✅ Early return jika notification null
+  if (!notification) return null;
+
+  // ✅ Safe access untuk type dengan fallback
+  const notificationType = notification.type || 'system';
+
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('id-ID', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const handleAction = () => {
+    if (!notification.reading) {
+      onMarkAsRead(notification.id);
+    }
+    if (notification.link) {
+      onNavigate(notification.link);
+    }
+    onClose();
+  };
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        onClick={onClose}
+      />
+
+      {/* Modal */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          className="bg-surface rounded-2xl w-full max-w-200 max-h-[90vh] overflow-y-auto shadow-2xl border border-border/50 animate-scale-in"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="sticky top-0 bg-surface/95 backdrop-blur border-b border-border p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${typeColors[notificationType]?.split(' ')[2] || 'border-gray-200'}`}>
+                {typeIcons[notificationType] || typeIcons.default}
+              </div>
+              <div>
+                <h3 className="font-bold text-text-primary">{typeLabels[notificationType] || 'Notifikasi'}</h3>
+                <p className="text-xs text-text-secondary flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {formatTime(notification.createdAt)}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-border rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5 text-text-secondary" />
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="p-4 space-y-4">
+            {/* Title & Message */}
+            <div>
+              <h4 className="font-semibold text-lg text-text-primary mb-2">
+                {notification.title || 'Tanpa Judul'}
+              </h4>
+              <p className="text-text-secondary whitespace-pre-line">
+                {notification.message || 'Tidak ada pesan'}
+              </p>
+            </div>
+
+            {/* Image (if any) */}
+            {notification.imageUrl && (
+              <div className="rounded-xl overflow-hidden border border-border">
+                <img
+                  src={notification.imageUrl}
+                  alt="Notification"
+                  className="w-full h-48 object-cover"
+                  loading="lazy"
+                  crossOrigin="anonymous"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            )}
+
+            {/* Sender Info (if any) */}
+            {notification.senderName && (
+              <div className="flex items-center gap-3 p-3 bg-surface/50 rounded-xl">
+                {notification.senderAvatar ? (
+                  <img
+                    src={notification.senderAvatar}
+                    alt={notification.senderName}
+                    className="w-10 h-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <User className="w-5 h-5 text-primary" />
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm font-medium text-text-primary">
+                    {notification.senderName}
+                  </p>
+                  <p className="text-xs text-text-secondary">Pengirim</p>
+                </div>
+              </div>
+            )}
+
+            {/* Action Button */}
+            {notification.link && (
+              <button
+                onClick={handleAction}
+                className="w-full btn-primary py-3 flex items-center justify-center gap-2"
+              >
+                <ExternalLink className="w-4 h-4" />
+                {notification.actionType === 'order_shipped' ? 'Lacak Pesanan' :
+                 notification.actionType === 'forum_reply' ? 'Lihat Balasan' :
+                 notification.actionType === 'payment_success' ? 'Lihat Pesanan' :
+                 'Lihat Detail'}
+              </button>
+            )}
+
+            {/* Reference Info */}
+            {notification.referenceId && (
+              <div className="p-3 bg-surface/50 rounded-xl">
+                <p className="text-xs text-text-secondary">
+                  Reference ID: <span className="font-mono text-text-primary">{notification.referenceId}</span>
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Footer Actions */}
+          <div className="sticky bottom-0 bg-surface/95 backdrop-blur border-t border-border p-4 flex gap-2">
+            {!notification.reading && (
+              <button
+                onClick={() => {
+                  onMarkAsRead(notification.id);
+                  onClose();
+                  toast.success('✅ Notifikasi ditandai sebagai dibaca', {
+                    duration: 2000,
+                    position: 'bottom-right',
+                  });
+                }}
+                className="flex-1 btn-outline py-3 flex items-center justify-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                Tandai Dibaca
+              </button>
+            )}
+            <button
+              onClick={() => {
+                onDelete(notification.id);
+                onClose();
+                toast.success('✅ Notifikasi dihapus', {
+                  duration: 2000,
+                  position: 'bottom-right',
+                });
+              }}
+              className="flex-1 btn-outline py-3 text-red-500 border-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              Hapus
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
+// ✅ MAIN PAGE COMPONENT
+// ============================================================================
 export default function NotificationsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -57,7 +265,6 @@ export default function NotificationsPage() {
     fetchNotifications();
   }, [isAuthenticated, router]);
 
-  // ✅ Refetch when filter changes
   useEffect(() => {
     if (isAuthenticated) {
       fetchNotifications();
@@ -83,6 +290,10 @@ export default function NotificationsPage() {
       }
     } catch (error) {
       console.error('Fetch notifications error:', error);
+      toast.error('❌ Gagal memuat notifikasi', {
+        duration: 4000,
+        position: 'bottom-right',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -106,6 +317,10 @@ export default function NotificationsPage() {
       });
     } catch (error) {
       console.error('Mark as read error:', error);
+      toast.error('❌ Gagal menandai sebagai dibaca', {
+        duration: 4000,
+        position: 'bottom-right',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -125,16 +340,23 @@ export default function NotificationsPage() {
         },
         body: JSON.stringify({ all: true }),
       });
+      
+      toast.success('✅ Semua notifikasi ditandai sebagai dibaca', {
+        duration: 3000,
+        position: 'bottom-right',
+      });
     } catch (error) {
       console.error('Mark all as read error:', error);
+      toast.error('❌ Gagal menandai semua sebagai dibaca', {
+        duration: 4000,
+        position: 'bottom-right',
+      });
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleDeleteNotification = async (id: string) => {
-    if (!confirm('Hapus notifikasi ini?')) return;
-    
     setActionLoading(`delete-${id}`);
     try {
       setNotifications(prev => prev.filter(n => n.id !== id));
@@ -148,16 +370,24 @@ export default function NotificationsPage() {
         },
         body: JSON.stringify({ id }),
       });
+      
+      toast.success('✅ Notifikasi dihapus', {
+        duration: 2500,
+        position: 'bottom-right',
+      });
     } catch (error) {
       console.error('Delete notification error:', error);
+      setNotifications(prev => prev); // Revert state on error
+      toast.error('❌ Gagal menghapus notifikasi', {
+        duration: 4000,
+        position: 'bottom-right',
+      });
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleClearAll = async () => {
-    if (!confirm('Hapus semua notifikasi?')) return;
-    
     setActionLoading('clear-all');
     try {
       setNotifications([]);
@@ -171,14 +401,29 @@ export default function NotificationsPage() {
         },
         body: JSON.stringify({ all: true }),
       });
+      
+      toast.success('✅ Semua notifikasi dihapus', {
+        duration: 3000,
+        position: 'bottom-right',
+      });
     } catch (error) {
       console.error('Clear all error:', error);
+      toast.error('❌ Gagal menghapus semua notifikasi', {
+        duration: 4000,
+        position: 'bottom-right',
+      });
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleNotificationClick = (notification: Notification) => {
+    // ✅ Validasi: Pastikan notification memiliki required fields
+    if (!notification?.id) {
+      console.error('Invalid notification:', notification);
+      return;
+    }
+    
     // Mark as read if unread
     if (!notification.reading) {
       handleMarkAsRead(notification.id);
@@ -211,7 +456,8 @@ export default function NotificationsPage() {
   const filteredNotifications = notifications.filter(n => {
     if (filter === 'all') return true;
     if (filter === 'unread') return !n.reading;
-    return n.type === filter;
+    // ✅ Safe access untuk type
+    return (n.type || 'system') === filter;
   });
 
   const unreadCount = notifications.filter(n => !n.reading).length;
@@ -313,70 +559,75 @@ export default function NotificationsPage() {
             </p>
           </div>
         ) : (
-          filteredNotifications.map((notification) => (
-            <div
-              key={notification.id}
-              onClick={() => handleNotificationClick(notification)}
-              className={`
-                p-4 rounded-xl border cursor-pointer transition-all
-                ${!notification.reading 
-                  ? 'bg-primary/5 border-primary/20 shadow-sm' 
-                  : 'bg-surface border-border hover:border-primary/30'
-                }
-                ${typeColors[notification.type]}
-              `}
-            >
-              <div className="flex gap-3">
-                {/* Icon */}
-                <div className={`flex-shrink-0 w-10 h-10 rounded-full bg-white dark:bg-background-dark flex items-center justify-center border ${typeColors[notification.type].split(' ')[2]}`}>
-                  {typeIcons[notification.type]}
-                </div>
-                
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className={`font-medium text-sm ${!notification.reading ? 'text-text-primary' : 'text-text-secondary'}`}>
-                      {notification.title}
+          filteredNotifications.map((notification) => {
+            // ✅ Safe access untuk type dengan fallback
+            const notificationType = notification.type || 'system';
+            
+            return (
+              <div
+                key={notification.id}
+                onClick={() => handleNotificationClick(notification)}
+                className={`
+                  p-4 rounded-xl border cursor-pointer transition-all
+                  ${!notification.reading 
+                    ? 'bg-primary/5 border-primary/20 shadow-sm' 
+                    : 'bg-surface border-border hover:border-primary/30'
+                  }
+                  ${typeColors[notificationType]}
+                `}
+              >
+                <div className="flex gap-3">
+                  {/* Icon - dengan fallback */}
+                  <div className={`flex-shrink-0 w-10 h-10 rounded-full bg-white dark:bg-background-dark flex items-center justify-center border ${typeColors[notificationType]?.split(' ')[2] || 'border-gray-200'}`}>
+                    {typeIcons[notificationType] || typeIcons.default}
+                  </div>
+                  
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className={`font-medium text-sm ${!notification.reading ? 'text-text-primary' : 'text-text-secondary'}`}>
+                        {notification.title || 'Tanpa Judul'}
+                      </p>
+                      {!notification.reading && (
+                        <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-1.5" />
+                      )}
+                    </div>
+                    <p className="text-xs text-text-secondary mt-1 line-clamp-2">
+                      {notification.message || 'Tidak ada pesan'}
                     </p>
-                    {!notification.reading && (
-                      <span className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-1.5" />
-                    )}
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-[10px] text-text-secondary/70">
+                        {formatTime(notification.createdAt)}
+                      </span>
+                      {notification.link && (
+                        <ExternalLink className="w-3 h-3 text-text-secondary/50" />
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-text-secondary mt-1 line-clamp-2">
-                    {notification.message}
-                  </p>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-[10px] text-text-secondary/70">
-                      {formatTime(notification.createdAt)}
-                    </span>
-                    {notification.link && (
-                      <ExternalLink className="w-3 h-3 text-text-secondary/50" />
+                  
+                  {/* Delete Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteNotification(notification.id);
+                    }}
+                    className="p-1 text-text-secondary/50 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                    disabled={actionLoading === `delete-${notification.id}`}
+                  >
+                    {actionLoading === `delete-${notification.id}` ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <X className="w-4 h-4" />
                     )}
-                  </div>
+                  </button>
                 </div>
-                
-                {/* Delete Button */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteNotification(notification.id);
-                  }}
-                  className="p-1 text-text-secondary/50 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                  disabled={actionLoading === `delete-${notification.id}`}
-                >
-                  {actionLoading === `delete-${notification.id}` ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <X className="w-4 h-4" />
-                  )}
-                </button>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
-      {/* ✅ NOTIFICATION DETAIL MODAL */}
+      {/* ✅ NOTIFICATION DETAIL MODAL - Inline component */}
       {selectedNotification && (
         <NotificationDetailModal
           notification={selectedNotification}

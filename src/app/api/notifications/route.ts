@@ -1,8 +1,20 @@
-// src/app/api/notifications/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { verifyAccessToken } from '@/utils/jwt.util';
 import { handleAPIError } from '@/lib/middleware';
+
+// ✅ HELPER: Replace template variables like {{username}} dengan nilai aktual
+function replaceTemplateVariables(text: string, variables: Record<string, string>): string {
+  if (!text) return text;
+  
+  let result = text;
+  for (const [key, value] of Object.entries(variables)) {
+    // Replace {{key}} dengan value
+    const regex = new RegExp(`{{${key}}}`, 'g');
+    result = result.replace(regex, value || '');
+  }
+  return result;
+}
 
 // ✅ GET: Fetch notifications for authenticated user
 export async function GET(req: NextRequest) {
@@ -23,7 +35,14 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const onlyUnread = searchParams.get('unread') === 'true';
 
-    // ✅ BUILD QUERY
+    // ✅ Ambil nama user penerima untuk template {{username}}
+    const [userRows] = await pool.execute(
+      'SELECT name FROM users WHERE id = ?',
+      [userId]
+    );
+    const recipientName = (userRows as any[])[0]?.name || 'Pengguna';
+
+    // ✅ BUILD QUERY - Join users untuk sender_name
     let query = `
       SELECT 
         n.id, 
@@ -47,7 +66,6 @@ export async function GET(req: NextRequest) {
     
     const params: any[] = [userId];
     
-    // ✅ Filter hanya unread jika requested
     if (onlyUnread) {
       query += ' AND n.reading = FALSE';
     }
@@ -57,22 +75,31 @@ export async function GET(req: NextRequest) {
 
     const [notifications] = await pool.execute(query, params);
 
-    // ✅ Format response
-    const formattedNotifications = (Array.isArray(notifications) ? notifications : []).map((n: any) => ({
-      id: n.id,
-      title: n.title,
-      message: n.message,
-      type: n.type,
-      reading: Boolean(n.reading),
-      senderId: n.sender_id,
-      senderName: n.sender_name,
-      senderAvatar: n.sender_avatar,
-      link: n.link,
-      imageUrl: n.image_url,
-      actionType: n.action_type,
-      referenceId: n.reference_id,
-      createdAt: n.created_at,
-    }));
+    // ✅ Format response dengan template variable replacement
+    const formattedNotifications = (Array.isArray(notifications) ? notifications : []).map((n: any) => {
+      // ✅ Replace {{username}} dengan nama penerima
+      const titleWithTemplate = replaceTemplateVariables(n.title, { username: recipientName });
+      const messageWithTemplate = replaceTemplateVariables(n.message, { username: recipientName });
+      
+      return {
+        id: n.id,
+        title: titleWithTemplate,  // ✅ Template sudah di-replace
+        message: messageWithTemplate,  // ✅ Template sudah di-replace
+        rawTitle: n.title,  // ✅ Optional: simpan versi raw untuk debug
+        rawMessage: n.message,  // ✅ Optional: simpan versi raw untuk debug
+        type: n.type,
+        reading: Boolean(n.reading),
+        senderId: n.sender_id,
+        senderName: n.sender_name,  // ✅ Nama pengirim (dari users table)
+        senderAvatar: n.sender_avatar,
+        recipientName: recipientName,  // ✅ Nama penerima (untuk referensi frontend)
+        link: n.link,
+        imageUrl: n.image_url,
+        actionType: n.action_type,
+        referenceId: n.reference_id,
+        createdAt: n.created_at,
+      };
+    });
 
     // ✅ Hitung unread count
     const [countResult] = await pool.execute(
@@ -88,6 +115,7 @@ export async function GET(req: NextRequest) {
         total: formattedNotifications.length,
         unreadCount,
         limit,
+        recipientName,  // ✅ Kirim nama penerima ke frontend (opsional)
       },
     });
 
@@ -114,9 +142,8 @@ export async function PATCH(req: NextRequest) {
     const userId = decoded.sub;
     const { id, reading, all } = await req.json();
 
-    // ✅ CASE 1: Update single notification reading status
+    // ✅ CASE 1: Update single notification
     if (id && reading !== undefined) {
-      // Verify ownership
       const [check] = await pool.execute(
         'SELECT id FROM notifications WHERE id = ? AND user_id = ? AND is_deleted = FALSE',
         [id, userId]
@@ -137,7 +164,7 @@ export async function PATCH(req: NextRequest) {
       });
     }
 
-    // ✅ CASE 2: Mark ALL notifications as read
+    // ✅ CASE 2: Mark ALL as read
     if (all === true) {
       await pool.execute(
         'UPDATE notifications SET reading = TRUE, updated_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND is_deleted = FALSE',

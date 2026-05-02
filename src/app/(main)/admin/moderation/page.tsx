@@ -1,4 +1,3 @@
-// src/app/(admin)/admin/moderation/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -6,7 +5,22 @@ import { useRouter } from 'next/navigation';
 import { Check, X, Eye, AlertCircle, Loader2, Search, ExternalLink, ZoomIn, Bell, Users, Send } from 'lucide-react';
 import { getCookie } from '@/lib/auth';
 import { formatDate } from '@/lib/utils';
+import toast from 'react-hot-toast';
 
+// ============================================================================
+// ✅ HELPER: Format Currency (jika belum ada di utils)
+// ============================================================================
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,
+  }).format(amount);
+};
+
+// ============================================================================
+// ✅ INTERFACES
+// ============================================================================
 interface PostImage {
   id: number;
   image_url: string;
@@ -34,8 +48,23 @@ interface Post {
   likes: number;
 }
 
+interface Product {
+  id: number;
+  name: string;
+  price: number;
+  unit: string;
+  stock: number;
+  status: string;
+  image_path?: string;
+}
+
+// ============================================================================
+// ✅ MAIN COMPONENT
+// ============================================================================
 export default function AdminModerationPage() {
   const router = useRouter();
+  
+  // ✅ Forum Moderation State
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -54,9 +83,62 @@ export default function AdminModerationPage() {
   });
   const [announceLoading, setAnnounceLoading] = useState(false);
 
+  // ✅ ✅ PRODUCT SEARCH STATE (yang sebelumnya missing!)
+  const [productSearch, setProductSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productLoading, setProductLoading] = useState(false);
+
+  // ============================================================================
+  // ✅ EFFECTS
+  // ============================================================================
+  
+  // Fetch pending posts on mount
   useEffect(() => {
     fetchPendingPosts();
   }, []);
+
+  // ✅ Debounced product search effect
+  useEffect(() => {
+    if (productSearch.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    
+    const timer = setTimeout(async () => {
+      try {
+        setProductLoading(true);
+        const token = getCookie('accessToken');
+        const res = await fetch(`/api/admin/products?search=${encodeURIComponent(productSearch)}&limit=10`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data.products || []);
+        }
+      } catch (error) {
+        console.error('Product search error:', error);
+      } finally {
+        setProductLoading(false);
+      }
+    }, 300); // 300ms debounce
+    
+    return () => clearTimeout(timer);
+  }, [productSearch]);
+
+  // ✅ Reset product search when modal closes
+  useEffect(() => {
+    if (!showAnnounceModal) {
+      setProductSearch('');
+      setSearchResults([]);
+      setSelectedProduct(null);
+    }
+  }, [showAnnounceModal]);
+
+  // ============================================================================
+  // ✅ FUNCTIONS
+  // ============================================================================
 
   const fetchPendingPosts = async () => {
     try {
@@ -73,6 +155,10 @@ export default function AdminModerationPage() {
       }
     } catch (error) {
       console.error('Fetch moderation error:', error);
+      toast.error('❌ Gagal memuat post yang menunggu review', {
+        duration: 4000,
+        position: 'bottom-right',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -96,7 +182,21 @@ export default function AdminModerationPage() {
       });
 
       if (res.ok) {
-        alert(`Post berhasil ${action === 'approve' ? 'disetujui' : 'ditolak'}`);
+        toast.success(
+          action === 'approve' 
+            ? '✅ Post disetujui dan sekarang publik' 
+            : '⚠️ Post ditolak dan user telah diberi tahu',
+          {
+            duration: 4000,
+            position: 'bottom-right',
+            style: {
+              background: action === 'approve' ? '#10B981' : '#F59E0B',
+              color: '#fff',
+            },
+            icon: action === 'approve' ? '✅' : '⚠️',
+          }
+        );
+        
         setSelectedPost(null);
         setAdminNote('');
         fetchPendingPosts();
@@ -105,16 +205,33 @@ export default function AdminModerationPage() {
         throw new Error(error.error || 'Gagal memproses');
       }
     } catch (error: any) {
-      alert(error.message);
+      toast.error(`❌ ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right',
+        style: {
+          background: '#EF4444',
+          color: '#fff',
+        },
+        action: {
+          label: 'Coba Lagi',
+          onClick: () => handleAction(postId, action),
+        },
+      });
     } finally {
       setActionLoading(null);
     }
   };
 
-  // ✅ Handle Broadcast Announcement
   const handleBroadcastAnnouncement = async () => {
     if (!announceForm.title.trim() || !announceForm.message.trim()) {
-      alert('Judul dan pesan wajib diisi');
+      toast.error('⚠️ Judul dan pesan wajib diisi', {
+        duration: 3000,
+        position: 'bottom-right',
+        style: {
+          background: '#F59E0B',
+          color: '#fff',
+        },
+      });
       return;
     }
 
@@ -143,7 +260,20 @@ export default function AdminModerationPage() {
       const data = await res.json();
       
       if (res.ok) {
-        alert(`✅ ${data.message}`);
+        toast.success(`✅ ${data.message}`, {
+          duration: 4000,
+          position: 'bottom-right',
+          style: {
+            background: '#10B981',
+            color: '#fff',
+          },
+          icon: '🔔',
+          action: {
+            label: 'Lihat Notifikasi',
+            onClick: () => router.push('/admin/notifications'),
+          },
+        });
+        
         setShowAnnounceModal(false);
         setAnnounceForm({
           title: '',
@@ -156,12 +286,22 @@ export default function AdminModerationPage() {
         throw new Error(data.error || 'Gagal mengirim pengumuman');
       }
     } catch (error: any) {
-      alert(error.message);
+      toast.error(`❌ ${error.message}`, {
+        duration: 5000,
+        position: 'bottom-right',
+        style: {
+          background: '#EF4444',
+          color: '#fff',
+        },
+      });
     } finally {
       setAnnounceLoading(false);
     }
   };
 
+  // ============================================================================
+  // ✅ LOADING STATE
+  // ============================================================================
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -170,12 +310,15 @@ export default function AdminModerationPage() {
     );
   }
 
+  // ============================================================================
+  // ✅ RENDER
+  // ============================================================================
   return (
     <div className="animate-fade-in min-h-screen pb-20">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-text-primary">Moderasi Forum</h1>
         <div className="flex gap-2">
-          {/* ✅ Broadcast Announcement Button */}
           <button
             onClick={() => setShowAnnounceModal(true)}
             className="btn-primary px-4 py-2 text-sm flex items-center gap-2"
@@ -280,7 +423,7 @@ export default function AdminModerationPage() {
       {/* ✅ DETAIL MODAL dengan Image Preview */}
       {selectedPost && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-background rounded-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-background rounded-2xl w-full max-w-300 p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-text-primary">Review Post</h2>
               <button
@@ -507,31 +650,153 @@ export default function AdminModerationPage() {
                 </div>
               )}
               
-              {/* Optional Link */}
+              {/* ✅ PRODUCT SEARCH SECTION - Ganti "Optional Link" */}
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-2">
-                  Link Tujuan (Opsional)
+                  🔍 Cari Produk untuk Promo
                 </label>
-                <input
-                  type="url"
-                  value={announceForm.link}
-                  onChange={(e) => setAnnounceForm({ ...announceForm, link: e.target.value })}
-                  placeholder="https://agri-x.com/promo"
-                  className="input w-full"
-                />
-                <p className="text-xs text-text-secondary mt-1">
-                  User akan diarahkan ke link ini saat klik notifikasi
+                
+                {/* Search Input */}
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary" />
+                  <input
+                    type="text"
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    placeholder="Cari nama produk, kategori, atau seller..."
+                    className="input w-full pl-10 pr-4"
+                    maxLength={100}
+                  />
+                  {productSearch && (
+                    <button
+                      onClick={() => setProductSearch('')}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary hover:text-primary transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                
+                {/* Search Results Dropdown */}
+                {productSearch.trim().length >= 2 && (
+                  <div className="mt-2 max-h-48 overflow-y-auto border border-border rounded-xl bg-surface/50">
+                    {productLoading ? (
+                      <div className="p-4 text-center text-text-secondary text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                        Mencari produk...
+                      </div>
+                    ) : searchResults.length > 0 ? (
+                      <div className="p-2 space-y-1">
+                        {searchResults.slice(0, 5).map((product: Product) => (
+                          <button
+                            key={product.id}
+                            onClick={() => {
+                              setSelectedProduct(product);
+                              setAnnounceForm(prev => ({
+                                ...prev,
+                                link: `/produk/${product.id}`,
+                                message: `${prev.message}\n\n🎁 Cek produk: ${product.name}`
+                              }));
+                              setProductSearch('');
+                            }}
+                            className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-primary/10 transition-colors text-left"
+                          >
+                            {/* Product Image */}
+                            <div className="w-10 h-10 bg-gradient-to-br from-secondary/20 to-primary/20 rounded-lg flex items-center justify-center text-lg flex-shrink-0 overflow-hidden">
+                              {product.image_path ? (
+                                <img
+                                  src={product.image_path}
+                                  alt={product.name}
+                                  className="w-full h-full object-cover rounded-lg"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <span>🌾</span>
+                              )}
+                            </div>
+                            
+                            {/* Product Info */}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-text-primary truncate">
+                                {product.name}
+                              </p>
+                              <p className="text-xs text-primary font-semibold">
+                                {formatCurrency(product.price)} / {product.unit}
+                              </p>
+                            </div>
+                            
+                            {/* Status Badge */}
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                              product.status === 'ready_stock' 
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                : product.status === 'pre-order'
+                                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                            }`}>
+                              {product.status === 'ready_stock' ? '✓' : 
+                               product.status === 'pre-order' ? '⏳' : '✗'}
+                            </span>
+                          </button>
+                        ))}
+                        {searchResults.length > 5 && (
+                          <p className="text-xs text-text-secondary text-center py-2">
+                            +{searchResults.length - 5} produk lainnya...
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center text-text-secondary text-sm">
+                        <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p>Tidak ada produk ditemukan</p>
+                        <p className="text-xs mt-1">Coba kata kunci lain</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Selected Product Preview */}
+                {selectedProduct && (
+                  <div className="mt-3 p-3 bg-primary/5 rounded-xl border border-primary/20 flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-secondary/20 to-primary/20 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
+                      {selectedProduct.image_path ? (
+                        <img
+                          src={selectedProduct.image_path}
+                          alt={selectedProduct.name}
+                          className="w-full h-full object-cover rounded-lg"
+                        />
+                      ) : (
+                        <span className="text-xl">🌾</span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text-primary truncate">
+                        {selectedProduct.name}
+                      </p>
+                      <p className="text-xs text-text-secondary">
+                        Link: <span className="font-mono text-primary">/produk/{selectedProduct.id}</span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedProduct(null);
+                        setAnnounceForm(prev => ({
+                          ...prev,
+                          link: '',
+                          message: prev.message.replace(/\n\n🎁 Cek produk:.*/, '')
+                        }));
+                      }}
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Hapus produk"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+                
+                <p className="text-xs text-text-secondary mt-2">
+                  💡 Pilih produk untuk otomatis tambahkan link & pesan promo
                 </p>
               </div>
-              
-              {/* Preview */}
-              {announceForm.title && announceForm.message && (
-                <div className="p-4 bg-primary/5 rounded-xl border border-primary/20">
-                  <p className="text-xs font-medium text-primary mb-1">Preview Notifikasi:</p>
-                  <p className="text-sm font-medium text-text-primary">{announceForm.title}</p>
-                  <p className="text-xs text-text-secondary line-clamp-2">{announceForm.message}</p>
-                </div>
-              )}
             </div>
             
             {/* Modal Footer */}

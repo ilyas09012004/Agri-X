@@ -9,10 +9,19 @@ import {
   Truck, 
   AlertCircle,
   Search,
-  Filter,
-  CreditCard
+  CreditCard,
+  Loader2
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
+
+// ✅ Fungsi bantu membaca cookie (SAMA PERSIS dengan checkout)
+const getCookie = (name: string): string | null => {
+  if (typeof document === 'undefined') return null;
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
+  return null;
+};
 
 const statusConfig: Record<string, {
   label: string;
@@ -26,7 +35,7 @@ const statusConfig: Record<string, {
     bg: 'bg-yellow-100',
     icon: Clock,
   },
-  paid: {
+  paid: { // Pastikan status ini sesuai dengan DB ('paid' atau 'settlement')
     label: 'Dibayar',
     color: 'text-green-600',
     bg: 'bg-green-100',
@@ -49,6 +58,13 @@ const statusConfig: Record<string, {
     color: 'text-red-600',
     bg: 'bg-red-100',
     icon: AlertCircle,
+  },
+  // Tambahkan fallback untuk status dari Midtrans jika belum diupdate webhook
+  settlement: {
+    label: 'Dibayar',
+    color: 'text-green-600',
+    bg: 'bg-green-100',
+    icon: CheckCircle,
   },
 };
 
@@ -75,15 +91,30 @@ export default function OrdersPage() {
   const fetchOrders = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('accessToken');
+      
+      // ✅ PERBAIKAN: Ambil token dari Cookie, bukan LocalStorage
+      const token = getCookie('accessToken');
+      
+      if (!token) {
+        console.warn('No access token found, redirecting to login...');
+        router.push('/login');
+        return;
+      }
       
       const res = await fetch(`/api/orders?status=${activeTab}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
+      if (res.status === 401) {
+         router.push('/login');
+         return;
+      }
+
       if (res.ok) {
         const data = await res.json();
         setOrders(data.orders || []);
+      } else {
+        console.error('Failed to fetch orders');
       }
     } catch (error) {
       console.error('Fetch orders error:', error);
@@ -95,9 +126,11 @@ export default function OrdersPage() {
   const filteredOrders = orders.filter(order => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
+    // Pastikan field yang dicari ada
     return (
       order.id.toString().includes(query) ||
-      order.address_detail?.toLowerCase().includes(query)
+      order.address?.recipientName?.toLowerCase().includes(query) ||
+      order.address?.detail?.toLowerCase().includes(query)
     );
   });
 
@@ -115,7 +148,7 @@ export default function OrdersPage() {
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
           <input
             type="text"
-            placeholder="Cari ID order atau alamat..."
+            placeholder="Cari ID order, nama penerima, atau alamat..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input pl-12"
@@ -145,12 +178,14 @@ export default function OrdersPage() {
       {/* Orders List */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <Loader2 className="w-10 h-10 text-primary animate-spin" />
         </div>
       ) : filteredOrders.length > 0 ? (
         <div className="space-y-4">
           {filteredOrders.map((order) => {
-            const statusInfo = statusConfig[order.status] || statusConfig.pending;
+            // Handle status mapping (paid vs settlement)
+            const rawStatus = order.paymentStatus || order.status;
+            const statusInfo = statusConfig[rawStatus] || statusConfig.pending;
             const StatusIcon = statusInfo.icon;
 
             return (
@@ -176,18 +211,18 @@ export default function OrdersPage() {
 
                 {/* Order Items Preview */}
                 <div className="flex gap-3 mb-4">
-                  {order.orderItems?.slice(0, 3).map((item: any) => (
-                    <div key={item.id} className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center text-2xl">
+                  {order.items?.slice(0, 3).map((item: any) => (
+                    <div key={item.id} className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center text-2xl overflow-hidden">
                       {item.productImage ? (
-                        <img src={item.productImage} alt={item.productName} className="w-full h-full object-cover rounded-lg" />
+                        <img src={item.productImage} alt={item.productName} className="w-full h-full object-cover" />
                       ) : (
                         '🌾'
                       )}
                     </div>
                   ))}
-                  {order.orderItems?.length > 3 && (
+                  {(order.items?.length || 0) > 3 && (
                     <div className="w-16 h-16 bg-surface rounded-lg flex items-center justify-center text-sm font-bold text-text-secondary">
-                      +{order.orderItems.length - 3}
+                      +{order.items.length - 3}
                     </div>
                   )}
                 </div>
@@ -201,7 +236,8 @@ export default function OrdersPage() {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    {order.status === 'pending' && order.paymentMethod !== 'cod' && (
+                    {/* Tombol Bayar hanya muncul jika status pending/unpaid DAN bukan COD */}
+                    {(order.status === 'pending' || order.paymentStatus === 'pending') && order.paymentMethod !== 'cod' && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -224,7 +260,7 @@ export default function OrdersPage() {
         </div>
       ) : (
         <div className="text-center py-20">
-          <Package className="w-24 h-24 mx-auto text-text-secondary mb-4" />
+          <Package className="w-24 h-24 mx-auto text-text-secondary mb-4 opacity-50" />
           <h3 className="text-xl font-semibold text-text-primary mb-2">
             {activeTab === 'all' ? 'Belum Ada Pesanan' : `Tidak Ada Pesanan ${orderTabs.find(t => t.id === activeTab)?.label}`}
           </h3>
